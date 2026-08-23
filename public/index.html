@@ -1,0 +1,1632 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>课本 PDF 在线标注（单文件静态版）</title>
+
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.css"
+    />
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.js"></script>
+
+    <style>
+      body {
+        background: #f3f4f6;
+      }
+
+      .page-container {
+        position: relative;
+        margin: 0 auto 20px;
+        background: #fff;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+      }
+
+      .highlight-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        pointer-events: none;
+      }
+
+      .highlight-rect {
+        position: absolute;
+        pointer-events: none;
+        border-radius: 2px;
+      }
+
+      .drag-select-box {
+        position: absolute;
+        border: 1px solid rgba(59, 130, 246, 0.95);
+        background: rgba(59, 130, 246, 0.18);
+        border-radius: 2px;
+        pointer-events: none;
+        z-index: 30;
+      }
+
+      .textLayer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        overflow: hidden;
+        line-height: 1;
+        -webkit-text-size-adjust: none;
+        forced-color-adjust: none;
+        transform-origin: 0 0;
+        user-select: text !important;
+        cursor: text;
+        z-index: 20;
+      }
+
+      .textLayer > span,
+      .textLayer > br {
+        color: transparent !important;
+        position: absolute;
+        white-space: pre;
+        cursor: text;
+        transform-origin: 0% 0%;
+      }
+
+      ::selection {
+        background: rgba(74, 144, 226, 0.3);
+      }
+
+      .pen-mode .textLayer {
+        user-select: none !important;
+        cursor: crosshair !important;
+      }
+
+      .pen-mode .textLayer > span,
+      .pen-mode .textLayer > br {
+        cursor: crosshair !important;
+      }
+
+    </style>
+  </head>
+
+  <body>
+    <div id="app" :class="['min-h-screen', penEnabled ? 'pen-mode' : '']">
+      <header
+        class="sticky top-0 z-50 bg-white border-b border-slate-200 px-4 py-3 flex flex-wrap items-center gap-3"
+      >
+        <h1 class="text-sm sm:text-base font-semibold text-slate-800 mr-2">
+          课本 PDF 在线标注（单文件静态版）
+        </h1>
+
+        <label class="text-sm text-slate-700" for="unitSelect">单元：</label>
+        <select
+          id="unitSelect"
+          class="border border-slate-300 rounded px-2 py-1 text-sm"
+          v-model.number="currentUnit"
+          @change="onUnitChange"
+        >
+          <option v-for="u in units" :key="u" :value="u">Unit {{ u }}</option>
+        </select>
+
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-xs text-slate-600">标注分类：</span>
+          <button
+            v-for="pen in pens"
+            :key="pen.id"
+            type="button"
+            class="relative text-xs rounded-full border px-3 py-1 transition inline-flex items-center gap-1.5"
+            :class="penEnabled && activePen === pen.id ? 'text-white border-transparent' : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400'"
+            :style="penEnabled && activePen === pen.id ? { backgroundColor: pen.colorStrong } : {}"
+            :title="pen.label"
+            @click="setActivePen(pen.id)"
+          >
+            <span
+              class="inline-block w-2 h-2 rounded-full"
+              :style="{ backgroundColor: pen.colorStrong }"
+            ></span>
+            {{ pen.label }}
+            <span
+              class="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[10px] leading-[14px]"
+              :class="penEnabled && activePen === pen.id ? 'bg-white/90 text-slate-700' : 'bg-slate-50 text-slate-700'"
+              :style="{ border: `1px solid ${pen.colorStrong}` }"
+            >
+              {{ currentUnitColorCount[pen.id] || 0 }}
+            </span>
+          </button>
+          <button
+            type="button"
+            class="text-xs rounded-full border border-slate-300 px-3 py-1 bg-white text-slate-700 hover:border-slate-400"
+            @click="disablePen"
+          >
+            退出标注
+          </button>
+        </div>
+
+        <button
+          type="button"
+          class="text-sm rounded px-3 py-1 border border-slate-300 bg-white text-slate-700"
+          @click="clearCurrentUnit"
+        >
+          清空本单元标注
+        </button>
+
+        <button
+          type="button"
+          class="text-sm rounded px-3 py-1 border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+          @click="saveCurrentUnitCsvManual"
+        >
+          保存
+        </button>
+
+        <span class="text-xs text-slate-500 ml-auto">
+          当前单元标注 {{ currentUnitCount }} 条（localStorage）
+        </span>
+      </header>
+
+      <main class="max-w-[1400px] mx-auto px-3 py-3">
+        <div class="text-xs text-slate-600 mb-2">{{ status }}</div>
+        <div
+          class="grid grid-cols-1 gap-3 items-start"
+          :class="isSidebarExpanded ? 'lg:grid-cols-[1fr_310px]' : 'lg:grid-cols-1'"
+        >
+          <section class="min-w-0">
+            <div ref="pdfContainer" aria-live="polite"></div>
+          </section>
+
+          <aside
+            v-if="isSidebarExpanded"
+            class="bg-white border border-slate-200 rounded p-3 lg:sticky lg:top-[74px]"
+          >
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="text-sm font-semibold text-slate-800">本单元标注列表</h2>
+              <span class="text-xs text-slate-500">{{ currentUnitCount }} 条</span>
+            </div>
+
+            <div v-if="!currentUnitSortedAnnotations.length" class="text-xs text-slate-500 leading-6">
+              暂无标注。点击上方分类按钮后，在课本文字上拖拽框选，标注会自动出现在这里。
+            </div>
+
+            <div v-else class="space-y-3 max-h-[72vh] overflow-auto pr-1">
+              <article
+                v-for="entry in currentUnitSortedAnnotations"
+                :key="entry.row.id"
+                class="border rounded p-2"
+                :class="[
+                  hasZhText(entry.row.zh) ? 'border-slate-200 bg-slate-50' : 'border-red-300 bg-red-50/40',
+                  appendTargetId === entry.row.id ? 'ring-2 ring-blue-300 border-blue-400' : ''
+                ]"
+              >
+                <div class="flex items-start gap-2 mb-2">
+                  <span
+                    class="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-[11px] mt-0.5"
+                    :style="{ backgroundColor: getPenStrongColorById(entry.penId) }"
+                  >
+                    {{ entry.categoryIndex }}
+                  </span>
+                  <div class="min-w-0 flex-1 pt-0.5">
+                    <div
+                      class="text-xs font-semibold leading-5"
+                      :style="{ color: getPenStrongColorById(entry.penId) }"
+                    >
+                      {{ getPenBadgeLabelById(entry.penId) }}
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <button
+                      v-if="isAppendablePen(entry.penId)"
+                      type="button"
+                      class="text-[11px] px-2 py-1 rounded border bg-white"
+                      :class="appendTargetId === entry.row.id ? 'border-blue-400 text-blue-700 bg-blue-50' : 'border-blue-200 text-blue-700 hover:bg-blue-50'"
+                      @click="startAppend(entry.row.id)"
+                    >
+                      补
+                    </button>
+                    <button
+                      type="button"
+                      class="text-[11px] px-2 py-1 rounded border border-slate-300 text-slate-600 bg-white hover:bg-slate-100"
+                      @click="restoreAnnotationText(entry.row.id)"
+                    >
+                      复原英文
+                    </button>
+                    <button
+                      type="button"
+                      class="text-xs px-2 py-1 rounded border border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
+                      @click="deleteAnnotation(entry.row.id)"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <textarea
+                    class="w-full border border-slate-300 rounded px-2 py-1 text-sm leading-6 resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="英文（自动填充，可手动修订）"
+                    rows="1"
+                    :ref="(el) => setAnnotationTextareaRef(entry.row.id, 'en', el)"
+                    v-model="entry.row.text"
+                    @input="onAnnotationTextInput(entry.row.id, entry.row.text)"
+                  ></textarea>
+                </div>
+
+                <div class="mt-2">
+                  <textarea
+                    class="w-full border rounded px-2 py-1 text-sm leading-6 resize-none overflow-hidden focus:outline-none focus:ring-2"
+                    :class="hasZhText(entry.row.zh) ? 'border-slate-300 focus:ring-blue-200' : 'border-red-300 focus:ring-red-200 bg-red-50/50'"
+                    placeholder="中文翻译（手动输入）"
+                    rows="1"
+                    :ref="(el) => setAnnotationTextareaRef(entry.row.id, 'zh', el)"
+                    v-model="entry.row.zh"
+                    @input="onAnnotationZhInput(entry.row.id, entry.row.zh)"
+                  ></textarea>
+                  <div v-if="!hasZhText(entry.row.zh)" class="mt-1 text-[11px] text-red-600">缺少中文翻译</div>
+                </div>
+              </article>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      (() => {
+        const { createApp } = Vue;
+
+        const PDF_WORKER_URL =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const SCALE = 1.5;
+        const STORAGE_KEY = 'textbook-annotator:annotations:v1';
+        const TOKEN_HIT_RATIO = 0.3;
+        const AUTO_SAVE_INTERVAL_MS = 3 * 60 * 1000;
+        const CSV_PROGRESS_COLUMNS = [
+          'unit',
+          'id',
+          'pen',
+          'pageNum',
+          'text',
+          'sourceText',
+          'zh',
+          'createdAt',
+          'rects'
+        ];
+        const UNIT_CSV_COLUMNS = ['id', 'pen', 'pageNum', 'text', 'sourceText', 'zh', 'createdAt', 'rects'];
+        const DEFAULT_WORDLIST_DIR = 'wordlist';
+        const UNIT_PAGE_RANGES = {
+          1: [8, 19],
+          2: [20, 31],
+          3: [32, 43],
+          4: [44, 55],
+          5: [58, 69],
+          6: [70, 81],
+          7: [82, 93],
+          8: [94, 105]
+        };
+        const PEN_PRESETS = [
+          {
+            id: 'core_word',
+            label: '核心单词',
+            color: 'rgba(37, 99, 235, 0.35)',
+            colorStrong: '#2563eb'
+          },
+          {
+            id: 'core_phrase',
+            label: '核心词组',
+            color: 'rgba(147, 51, 234, 0.32)',
+            colorStrong: '#9333ea'
+          },
+          {
+            id: 'ext_word',
+            label: '拓展单词',
+            color: 'rgba(37, 99, 235, 0.35)',
+            colorStrong: '#2563eb'
+          },
+          {
+            id: 'ext_phrase',
+            label: '拓展词组',
+            color: 'rgba(147, 51, 234, 0.32)',
+            colorStrong: '#9333ea'
+          },
+          {
+            id: 'core_sentence',
+            label: '核心句',
+            color: 'rgba(245, 158, 11, 0.36)',
+            colorStrong: '#f59e0b'
+          },
+          {
+            id: 'ext_sentence',
+            label: '拓展句子',
+            color: 'rgba(245, 158, 11, 0.36)',
+            colorStrong: '#f59e0b'
+          }
+        ];
+        const PEN_PANEL_ORDER = [
+          'core_word',
+          'ext_word',
+          'core_phrase',
+          'ext_phrase',
+          'core_sentence',
+          'ext_sentence'
+        ];
+        const PEN_PANEL_ORDER_MAP = Object.fromEntries(
+          PEN_PANEL_ORDER.map((penId, index) => [penId, index])
+        );
+
+        createApp({
+          data() {
+            return {
+              units: [1, 2, 3, 4, 5, 6, 7, 8],
+              currentUnit: 1,
+              penEnabled: false,
+              pens: PEN_PRESETS,
+              activePen: PEN_PRESETS[0].id,
+              dragState: null,
+              status: '正在初始化...',
+              annotationsByUnit: this.createEmptyUnitMap(),
+              annotationTextareaRefs: {},
+              appendTargetId: null,
+              csvFileHandlesByUnit: {},
+              autoSaveTimerId: null,
+              hasUnsavedCsvChanges: false,
+              autoSaveHintShown: false,
+              isSidebarExpanded: true
+            };
+          },
+          computed: {
+            currentUnitCount() {
+              return (this.annotationsByUnit[String(this.currentUnit)] || []).length;
+            },
+            currentUnitAnnotations() {
+              return this.annotationsByUnit[String(this.currentUnit)] || [];
+            },
+            currentUnitSortedAnnotations() {
+              const rows = [...this.currentUnitAnnotations];
+              rows.sort((a, b) => {
+                const penA = this.normalizePenId(a?.pen);
+                const penB = this.normalizePenId(b?.pen);
+                const orderA = this.getPenSortIndex(penA);
+                const orderB = this.getPenSortIndex(penB);
+                if (orderA !== orderB) return orderA - orderB;
+
+                const createdAtA = Number.isFinite(Number(a?.createdAt)) ? Number(a.createdAt) : 0;
+                const createdAtB = Number.isFinite(Number(b?.createdAt)) ? Number(b.createdAt) : 0;
+                if (createdAtA !== createdAtB) return createdAtA - createdAtB;
+
+                const pageA = Number.isFinite(Number(a?.pageNum)) ? Number(a.pageNum) : 0;
+                const pageB = Number.isFinite(Number(b?.pageNum)) ? Number(b.pageNum) : 0;
+                if (pageA !== pageB) return pageA - pageB;
+
+                return String(a?.id || '').localeCompare(String(b?.id || ''));
+              });
+
+              const byPenCounter = Object.fromEntries(this.pens.map((pen) => [pen.id, 0]));
+              return rows.map((row) => {
+                const penId = this.normalizePenId(row?.pen);
+                byPenCounter[penId] = (byPenCounter[penId] || 0) + 1;
+                return {
+                  row,
+                  penId,
+                  categoryIndex: byPenCounter[penId]
+                };
+              });
+            },
+            currentUnitColorCount() {
+              const count = Object.fromEntries(this.pens.map((pen) => [pen.id, 0]));
+              for (const row of this.currentUnitAnnotations) {
+                const penId = this.normalizePenId(row?.pen);
+                if (count[penId] === undefined) count[penId] = 0;
+                count[penId] += 1;
+              }
+              return count;
+            }
+          },
+          methods: {
+            createEmptyUnitMap() {
+              return Object.fromEntries(Array.from({ length: 8 }, (_, i) => [String(i + 1), []]));
+            },
+            setStatus(message) {
+              this.status = message;
+            },
+            findCurrentAnnotationById(annotationId) {
+              const rows = this.annotationsByUnit[String(this.currentUnit)] || [];
+              const idx = rows.findIndex((row) => row.id === annotationId);
+              if (idx < 0) return { row: null, idx: -1, rows };
+              return { row: rows[idx], idx, rows };
+            },
+            isAppendablePen(penId) {
+              const normalized = this.normalizePenId(penId);
+              return (
+                normalized === 'core_phrase' ||
+                normalized === 'ext_phrase' ||
+                normalized === 'core_sentence' ||
+                normalized === 'ext_sentence'
+              );
+            },
+            cancelAppend(silent = false) {
+              if (!this.appendTargetId) return;
+              this.appendTargetId = null;
+              if (!silent) {
+                this.setStatus('已取消补录。');
+              }
+            },
+            startAppend(annotationId) {
+              const { row } = this.findCurrentAnnotationById(annotationId);
+              if (!row) {
+                this.setStatus('补录失败：未找到目标词条。');
+                return;
+              }
+              if (!this.isAppendablePen(row.pen)) {
+                this.setStatus('当前仅支持“核心/拓展词组、核心/拓展句”使用补录。');
+                return;
+              }
+
+              this.appendTargetId = annotationId;
+              this.activePen = this.normalizePenId(row.pen);
+              this.penEnabled = true;
+              this.setStatus('已进入补录：请在 PDF 上继续框选，内容将追加到该条后。按 Esc 可取消。');
+            },
+            appendSelectionToAnnotation(annotationId, pageNum, text, rects) {
+              const { row } = this.findCurrentAnnotationById(annotationId);
+              if (!row) {
+                this.setStatus('补录失败：目标词条不存在（可能已被删除）。');
+                return false;
+              }
+              if (!this.isAppendablePen(row.pen)) {
+                this.setStatus('补录失败：该分类不支持补录。');
+                return false;
+              }
+              if (Number(row.pageNum) !== Number(pageNum)) {
+                this.setStatus('补录暂不支持跨页，请在同一页继续框选，或新建一条标注。');
+                return false;
+              }
+
+              const mergedText = `${row.text || ''} ${text || ''}`.replace(/\s+/g, ' ').trim();
+              row.text = mergedText;
+
+              const existingRects = Array.isArray(row.rects) ? row.rects : [];
+              row.rects = [...existingRects, ...(Array.isArray(rects) ? rects : [])];
+              this.saveLocalAnnotations();
+              this.repaintCurrentUnitHighlights();
+              this.$nextTick(() => this.syncAnnotationTextareaHeights(annotationId));
+              return true;
+            },
+            unitPdfPath(unitId) {
+              return `unit${unitId}.pdf`;
+            },
+            loadLocalAnnotations() {
+              try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (!raw) return;
+                const parsed = JSON.parse(raw);
+                const merged = this.createEmptyUnitMap();
+                for (const key of Object.keys(merged)) {
+                  const list = parsed?.[key];
+                  merged[key] = Array.isArray(list)
+                    ? list.map((row) => ({
+                        ...row,
+                        pen:
+                          typeof row?.pen === 'string' && PEN_PRESETS.some((p) => p.id === row.pen)
+                            ? row.pen
+                            : PEN_PRESETS[0].id,
+                        text: typeof row?.text === 'string' ? row.text : '',
+                        sourceText:
+                          typeof row?.sourceText === 'string'
+                            ? row.sourceText
+                            : typeof row?.text === 'string'
+                              ? row.text
+                              : '',
+                        zh: typeof row?.zh === 'string' ? row.zh : ''
+                      }))
+                    : [];
+                }
+                this.annotationsByUnit = Object.fromEntries(
+                  Object.entries(merged).map(([unitKey, rows]) => {
+                    const unitId = Number(unitKey);
+                    return [unitKey, this.normalizeUnitRowsPageNums(unitId, rows, 'auto')];
+                  })
+                );
+              } catch (error) {
+                console.warn('读取 localStorage 失败，已忽略：', error);
+              }
+            },
+            saveLocalAnnotations() {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(this.annotationsByUnit));
+              this.hasUnsavedCsvChanges = true;
+            },
+            normalizePenId(penId) {
+              return this.pens.some((p) => p.id === penId) ? penId : PEN_PRESETS[0].id;
+            },
+            getPenSortIndex(penId) {
+              return PEN_PANEL_ORDER_MAP[penId] ?? 999;
+            },
+            getPenColorById(penId) {
+              const normalized = this.normalizePenId(penId);
+              return this.pens.find((p) => p.id === normalized)?.color || this.pens[0].color;
+            },
+            getPenStrongColorById(penId) {
+              const normalized = this.normalizePenId(penId);
+              return this.pens.find((p) => p.id === normalized)?.colorStrong || '#334155';
+            },
+            getPenLabelById(penId) {
+              const normalized = this.normalizePenId(penId);
+              return this.pens.find((p) => p.id === normalized)?.label || this.pens[0].label;
+            },
+            getPenBadgeLabelById(penId) {
+              switch (this.normalizePenId(penId)) {
+                case 'core_word':
+                  return '核心词';
+                case 'ext_word':
+                  return '*拓展词';
+                case 'core_phrase':
+                  return '核心词组';
+                case 'ext_phrase':
+                  return '*拓展词组';
+                case 'core_sentence':
+                  return '核心句';
+                case 'ext_sentence':
+                  return '*拓展句子';
+                default:
+                  return '核心词';
+              }
+            },
+            setActivePen(penId) {
+              const isSame = this.activePen === penId;
+              if (this.penEnabled && isSame) {
+                this.penEnabled = false;
+                this.isSidebarExpanded = false;
+                this.setStatus('已退出标注模式，可正常选中复制文字。');
+                return;
+              }
+
+              this.activePen = penId;
+              this.penEnabled = true;
+              this.isSidebarExpanded = true;
+              this.setStatus(
+                `已开启「${this.getPenLabelById(penId)}」标注：请在文字上拖拽框选。`
+              );
+            },
+            disablePen() {
+              this.cancelAppend(true);
+              this.penEnabled = false;
+              this.isSidebarExpanded = false;
+              this.setStatus('已退出标注模式，可正常选中复制文字。');
+            },
+            updateAnnotationText(annotationId, editedText) {
+              const unitKey = String(this.currentUnit);
+              const rows = this.annotationsByUnit[unitKey] || [];
+              const idx = rows.findIndex((row) => row.id === annotationId);
+              if (idx < 0) return;
+              rows[idx].text = typeof editedText === 'string' ? editedText : '';
+              this.saveLocalAnnotations();
+            },
+            onAnnotationTextInput(annotationId, editedText) {
+              this.updateAnnotationText(annotationId, editedText);
+              this.$nextTick(() => this.syncAnnotationTextareaHeights(annotationId));
+            },
+            restoreAnnotationText(annotationId) {
+              const unitKey = String(this.currentUnit);
+              const rows = this.annotationsByUnit[unitKey] || [];
+              const idx = rows.findIndex((row) => row.id === annotationId);
+              if (idx < 0) return;
+              rows[idx].text = typeof rows[idx].sourceText === 'string' ? rows[idx].sourceText : '';
+              this.saveLocalAnnotations();
+              this.setStatus('已一键复原该条原始框选英文。');
+              this.$nextTick(() => this.syncAnnotationTextareaHeights(annotationId));
+            },
+            updateAnnotationZh(annotationId, zhText) {
+              const unitKey = String(this.currentUnit);
+              const rows = this.annotationsByUnit[unitKey] || [];
+              const idx = rows.findIndex((row) => row.id === annotationId);
+              if (idx < 0) return;
+              rows[idx].zh = typeof zhText === 'string' ? zhText : '';
+              this.saveLocalAnnotations();
+            },
+            onAnnotationZhInput(annotationId, zhText) {
+              this.updateAnnotationZh(annotationId, zhText);
+              this.$nextTick(() => this.syncAnnotationTextareaHeights(annotationId));
+            },
+            hasZhText(zhText) {
+              return typeof zhText === 'string' && zhText.trim().length > 0;
+            },
+            setAnnotationTextareaRef(annotationId, field, el) {
+              if (!annotationId || (field !== 'en' && field !== 'zh')) return;
+              if (!this.annotationTextareaRefs[annotationId]) {
+                this.annotationTextareaRefs[annotationId] = { en: null, zh: null };
+              }
+              this.annotationTextareaRefs[annotationId][field] = el || null;
+
+              if (!el) {
+                const refs = this.annotationTextareaRefs[annotationId];
+                if (!refs?.en && !refs?.zh) {
+                  delete this.annotationTextareaRefs[annotationId];
+                }
+                return;
+              }
+
+              this.$nextTick(() => this.syncAnnotationTextareaHeights(annotationId));
+            },
+            getTextareaMinHeight(textareaEl) {
+              if (!textareaEl || !window.getComputedStyle) return 32;
+              const style = window.getComputedStyle(textareaEl);
+              const lineHeight = parseFloat(style.lineHeight) || 24;
+              const paddingTop = parseFloat(style.paddingTop) || 0;
+              const paddingBottom = parseFloat(style.paddingBottom) || 0;
+              const borderTop = parseFloat(style.borderTopWidth) || 0;
+              const borderBottom = parseFloat(style.borderBottomWidth) || 0;
+              return Math.ceil(lineHeight + paddingTop + paddingBottom + borderTop + borderBottom);
+            },
+            syncAnnotationTextareaHeights(annotationId) {
+              const refs = this.annotationTextareaRefs[annotationId];
+              if (!refs?.en || !refs?.zh) return;
+
+              const enEl = refs.en;
+              const zhEl = refs.zh;
+              enEl.style.height = 'auto';
+              zhEl.style.height = 'auto';
+
+              const minHeight = Math.max(
+                this.getTextareaMinHeight(enEl),
+                this.getTextareaMinHeight(zhEl)
+              );
+              const target = Math.max(minHeight, enEl.scrollHeight, zhEl.scrollHeight);
+
+              enEl.style.height = `${target}px`;
+              zhEl.style.height = `${target}px`;
+            },
+            syncAllAnnotationTextareaHeights() {
+              for (const annotationId of Object.keys(this.annotationTextareaRefs)) {
+                this.syncAnnotationTextareaHeights(annotationId);
+              }
+            },
+            escapeCsvField(value) {
+              const raw = value === null || value === undefined ? '' : String(value);
+              return `"${raw.replace(/"/g, '""')}"`;
+            },
+            formatTimestamp(ts) {
+              const n = Number(ts);
+              if (!Number.isFinite(n) || n <= 0) return '';
+              return new Date(n).toISOString();
+            },
+            getCurrentUnitKey() {
+              return String(this.currentUnit);
+            },
+            getCurrentUnitFilename() {
+              return `unit${this.currentUnit}.csv`;
+            },
+            getCurrentUnitRelativePath() {
+              return `${DEFAULT_WORDLIST_DIR}/${this.getCurrentUnitFilename()}`;
+            },
+            getUnitPageRange(unitId = this.currentUnit) {
+              const range = UNIT_PAGE_RANGES[Number(unitId)] || [1, 1];
+              const start = Number(range[0]);
+              const end = Number(range[1]);
+              if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+                return { start: 1, end: 1, length: 1 };
+              }
+              return { start, end, length: end - start + 1 };
+            },
+            toBookPageNum(unitId, pdfPageNum) {
+              const { start } = this.getUnitPageRange(unitId);
+              const page = Number(pdfPageNum);
+              if (!Number.isFinite(page) || page <= 0) return start;
+              return start + page - 1;
+            },
+            toPdfPageNum(unitId, storedPageNum) {
+              const { start, end, length } = this.getUnitPageRange(unitId);
+              const page = Number(storedPageNum);
+              if (!Number.isFinite(page) || page <= 0) return 1;
+
+              // 当前导入/本地读取阶段会先把旧数据统一换算成“书本页码”，
+              // 因此渲染时优先按书本页码反算回 PDF 页码。
+              if (page >= start && page <= end) {
+                return page - start + 1;
+              }
+              // 兜底：仍兼容偶发未迁移的旧数据（单元内页码 1..N）。
+              if (page >= 1 && page <= length) {
+                return page;
+              }
+              return page;
+            },
+            getUnitHandle(unitKey) {
+              return this.csvFileHandlesByUnit[unitKey] || null;
+            },
+            setUnitHandle(unitKey, handle) {
+              this.csvFileHandlesByUnit = {
+                ...this.csvFileHandlesByUnit,
+                [unitKey]: handle
+              };
+            },
+            getProgressCsvFilename() {
+              return 'all-progress.csv';
+            },
+            buildCurrentUnitRows() {
+              const unitKey = this.getCurrentUnitKey();
+              const rows = this.annotationsByUnit[unitKey] || [];
+              const lines = [];
+              for (const row of rows) {
+                const rects = Array.isArray(row?.rects) ? row.rects : [];
+                lines.push([
+                  String(row?.id || ''),
+                  this.normalizePenId(row?.pen),
+                  Number.isFinite(Number(row?.pageNum)) ? Number(row.pageNum) : '',
+                  row?.text || '',
+                  row?.sourceText || '',
+                  row?.zh || '',
+                  Number.isFinite(Number(row?.createdAt)) ? Number(row.createdAt) : '',
+                  JSON.stringify(rects)
+                ]);
+              }
+              return lines;
+            },
+            generateCurrentUnitCsvText() {
+              const lines = [UNIT_CSV_COLUMNS.map((cell) => this.escapeCsvField(cell)).join(',')];
+              for (const row of this.buildCurrentUnitRows()) {
+                lines.push(row.map((cell) => this.escapeCsvField(cell)).join(','));
+              }
+              return `\uFEFF${lines.join('\r\n')}`;
+            },
+            buildProgressRows() {
+              const lines = [];
+              for (const unit of this.units) {
+                const unitKey = String(unit);
+                const rows = this.annotationsByUnit[unitKey] || [];
+                for (const row of rows) {
+                  const rects = Array.isArray(row?.rects) ? row.rects : [];
+                  lines.push([
+                    unitKey,
+                    String(row?.id || ''),
+                    this.normalizePenId(row?.pen),
+                    Number.isFinite(Number(row?.pageNum)) ? Number(row.pageNum) : '',
+                    row?.text || '',
+                    row?.sourceText || '',
+                    row?.zh || '',
+                    Number.isFinite(Number(row?.createdAt)) ? Number(row.createdAt) : '',
+                    JSON.stringify(rects)
+                  ]);
+                }
+              }
+              return lines;
+            },
+            generateProgressCsvText() {
+              const lines = [CSV_PROGRESS_COLUMNS.map((cell) => this.escapeCsvField(cell)).join(',')];
+              for (const row of this.buildProgressRows()) {
+                lines.push(row.map((cell) => this.escapeCsvField(cell)).join(','));
+              }
+              return `\uFEFF${lines.join('\r\n')}`;
+            },
+            async writeCsvToHandle(handle, csvText) {
+              const writable = await handle.createWritable();
+              await writable.write(csvText);
+              await writable.close();
+            },
+            downloadCsvBackup(csvText, filename) {
+              const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+              const link = document.createElement('a');
+              const url = URL.createObjectURL(blob);
+              link.href = url;
+              link.download = filename;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              URL.revokeObjectURL(url);
+            },
+            async saveCurrentUnitCsvManual() {
+              const unitKey = this.getCurrentUnitKey();
+              const unitCount = (this.annotationsByUnit[unitKey] || []).length;
+              const csvText = this.generateCurrentUnitCsvText();
+              const unitFilename = this.getCurrentUnitFilename();
+              const unitPath = this.getCurrentUnitRelativePath();
+              const pickerSupported =
+                typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function';
+
+              try {
+                if (pickerSupported) {
+                  let handle = this.getUnitHandle(unitKey);
+                  if (!handle) {
+                    handle = await window.showSaveFilePicker({
+                      suggestedName: unitFilename,
+                      startIn: 'documents',
+                      types: [
+                        {
+                          description: 'CSV 文件',
+                          accept: { 'text/csv': ['.csv'] }
+                        }
+                      ]
+                    });
+                    this.setUnitHandle(unitKey, handle);
+                  }
+                  await this.writeCsvToHandle(handle, csvText);
+                  this.hasUnsavedCsvChanges = false;
+                  this.autoSaveHintShown = false;
+                  this.setStatus(
+                    `保存成功：Unit ${this.currentUnit} 已写入 ${unitFilename}（${unitCount} 条）。建议放在 public/${unitPath}；后续每 3 分钟自动保存到同一文件。`
+                  );
+                  return;
+                }
+
+                this.downloadCsvBackup(csvText, unitFilename);
+                this.hasUnsavedCsvChanges = false;
+                this.autoSaveHintShown = false;
+                this.setStatus(
+                  `已下载 Unit ${this.currentUnit} 的 CSV（${unitCount} 条，建议文件名 ${unitPath}）。当前浏览器不支持自动写回文件，请手动覆盖保存。`
+                );
+              } catch (error) {
+                this.setStatus(`保存失败：${String(error?.message || error)}`);
+              }
+            },
+            startAutoSaveTimer() {
+              this.stopAutoSaveTimer();
+              this.autoSaveTimerId = window.setInterval(() => {
+                this.autoSaveTick();
+              }, AUTO_SAVE_INTERVAL_MS);
+            },
+            stopAutoSaveTimer() {
+              if (this.autoSaveTimerId) {
+                window.clearInterval(this.autoSaveTimerId);
+                this.autoSaveTimerId = null;
+              }
+            },
+            async autoSaveTick() {
+              if (!this.hasUnsavedCsvChanges) return;
+              const unitKey = this.getCurrentUnitKey();
+              const handle = this.getUnitHandle(unitKey);
+              if (!handle) {
+                if (!this.autoSaveHintShown) {
+                  this.autoSaveHintShown = true;
+                  this.setStatus('检测到未保存修改：请先点击一次“保存”，之后将每 3 分钟自动保存当前单元。');
+                }
+                return;
+              }
+
+              try {
+                const csvText = this.generateCurrentUnitCsvText();
+                await this.writeCsvToHandle(handle, csvText);
+                this.hasUnsavedCsvChanges = false;
+                this.setStatus(`自动保存完成（Unit ${this.currentUnit} CSV 已写入）。`);
+              } catch (error) {
+                this.setStatus(`自动保存失败：${String(error?.message || error)}；请手动点击“保存”。`);
+              }
+            },
+            parseCsvText(csvText) {
+              const rows = [];
+              let current = '';
+              let row = [];
+              let inQuotes = false;
+
+              for (let i = 0; i < csvText.length; i += 1) {
+                const ch = csvText[i];
+                if (inQuotes) {
+                  if (ch === '"') {
+                    if (csvText[i + 1] === '"') {
+                      current += '"';
+                      i += 1;
+                    } else {
+                      inQuotes = false;
+                    }
+                  } else {
+                    current += ch;
+                  }
+                } else if (ch === '"') {
+                  inQuotes = true;
+                } else if (ch === ',') {
+                  row.push(current);
+                  current = '';
+                } else if (ch === '\n') {
+                  row.push(current);
+                  rows.push(row);
+                  row = [];
+                  current = '';
+                } else if (ch !== '\r') {
+                  current += ch;
+                }
+              }
+
+              if (current.length > 0 || row.length > 0) {
+                row.push(current);
+                rows.push(row);
+              }
+
+              return rows;
+            },
+            detectPageNumModeFromTable(
+              table,
+              indexMap,
+              unitId,
+              preferredMode = 'auto',
+              unitKeyFilter = null
+            ) {
+              if (preferredMode === 'relative' || preferredMode === 'book') {
+                return preferredMode;
+              }
+
+              const { start, end, length } = this.getUnitPageRange(unitId);
+              let hasRelativeSignal = false;
+              let hasBookSignal = false;
+
+              for (let i = 1; i < table.length; i += 1) {
+                const line = table[i];
+                if (!line?.length) continue;
+                if (unitKeyFilter !== null && indexMap.unit !== undefined) {
+                  const unitKey = String(line[indexMap.unit] || '').trim();
+                  if (unitKey !== String(unitKeyFilter)) continue;
+                }
+                const page = Number(line[indexMap.pageNum]);
+                if (!Number.isFinite(page) || page <= 0) continue;
+
+                if (page < start && page >= 1 && page <= length) {
+                  hasRelativeSignal = true;
+                }
+                if (page > length && page >= start && page <= end) {
+                  hasBookSignal = true;
+                }
+              }
+
+              if (hasRelativeSignal && !hasBookSignal) return 'relative';
+              if (hasBookSignal && !hasRelativeSignal) return 'book';
+              return 'book';
+            },
+            normalizeUnitRowsPageNums(unitId, rows, preferredMode = 'auto') {
+              const list = Array.isArray(rows) ? rows : [];
+              const fauxTable = [
+                ['id', 'pageNum'],
+                ...list.map((row) => [String(row?.id || ''), Number(row?.pageNum)])
+              ];
+              const mode = this.detectPageNumModeFromTable(
+                fauxTable,
+                { pageNum: 1 },
+                unitId,
+                preferredMode
+              );
+
+              return list.map((row) => ({
+                ...row,
+                pageNum: this.normalizeImportedPageNum(unitId, row?.pageNum, mode)
+              }));
+            },
+            normalizeImportedPageNum(unitId, rawPageNum, pageMode = 'auto') {
+              const page = Number(rawPageNum);
+              if (!Number.isFinite(page) || page <= 0) {
+                return this.getUnitPageRange(unitId).start;
+              }
+
+              const { length } = this.getUnitPageRange(unitId);
+              if (pageMode === 'relative') {
+                return this.toBookPageNum(unitId, Math.min(Math.max(page, 1), length));
+              }
+              return page;
+            },
+            createAnnotationFromCsvLine(line, indexMap, options = {}) {
+              const unitId = Number(options?.unitId || this.currentUnit);
+              const pageMode = options?.pageMode || 'auto';
+              const pen = this.normalizePenId(String(line[indexMap.pen] || ''));
+              const rectsRaw = String(line[indexMap.rects] || '[]');
+              let rects = [];
+              try {
+                const parsedRects = JSON.parse(rectsRaw);
+                rects = Array.isArray(parsedRects) ? parsedRects : [];
+              } catch {
+                rects = [];
+              }
+
+              return {
+                id: String(line[indexMap.id] || crypto.randomUUID()),
+                pen,
+                pageNum: this.normalizeImportedPageNum(unitId, line[indexMap.pageNum], pageMode),
+                text: String(line[indexMap.text] || ''),
+                sourceText: String(line[indexMap.sourceText] || line[indexMap.text] || ''),
+                zh: String(line[indexMap.zh] || ''),
+                createdAt: Number.isFinite(Number(line[indexMap.createdAt]))
+                  ? Number(line[indexMap.createdAt])
+                  : Date.now(),
+                rects
+              };
+            },
+            importProgressFromCsvText(csvText, sourceLabel = 'CSV') {
+              const table = this.parseCsvText(csvText.replace(/^\uFEFF/, ''));
+              if (!table.length) {
+                return { ok: false, message: `${sourceLabel} 内容为空。` };
+              }
+
+              const header = table[0].map((h) => String(h || '').trim());
+              const indexMap = Object.fromEntries(header.map((name, idx) => [name, idx]));
+              const required = [...CSV_PROGRESS_COLUMNS];
+              const missing = required.filter((name) => indexMap[name] === undefined);
+              if (missing.length) {
+                return { ok: false, message: `${sourceLabel} 缺少字段 ${missing.join('、')}。` };
+              }
+
+              const merged = this.createEmptyUnitMap();
+              let imported = 0;
+              for (let i = 1; i < table.length; i += 1) {
+                const line = table[i];
+                if (!line?.length) continue;
+
+                const unitKey = String(line[indexMap.unit] || '').trim();
+                if (!Object.prototype.hasOwnProperty.call(merged, unitKey)) continue;
+
+                const unitId = Number(unitKey);
+                const pageMode = this.detectPageNumModeFromTable(
+                  table,
+                  indexMap,
+                  unitId,
+                  'auto',
+                  unitKey
+                );
+                merged[unitKey].push(
+                  this.createAnnotationFromCsvLine(line, indexMap, { unitId, pageMode })
+                );
+                imported += 1;
+              }
+
+              this.annotationsByUnit = Object.fromEntries(
+                Object.entries(merged).map(([unitKey, rows]) => {
+                  const unitId = Number(unitKey);
+                  return [unitKey, this.normalizeUnitRowsPageNums(unitId, rows, 'auto')];
+                })
+              );
+              this.cancelAppend(true);
+              this.annotationTextareaRefs = {};
+              this.saveLocalAnnotations();
+              this.hasUnsavedCsvChanges = false;
+              this.repaintCurrentUnitHighlights();
+              this.$nextTick(() => this.syncAllAnnotationTextareaHeights());
+              return { ok: true, imported };
+            },
+            importCurrentUnitFromCsvText(csvText, sourceLabel = 'CSV') {
+              const table = this.parseCsvText(csvText.replace(/^\uFEFF/, ''));
+              if (!table.length) {
+                return { ok: false, message: `${sourceLabel} 内容为空。` };
+              }
+
+              const header = table[0].map((h) => String(h || '').trim());
+              const indexMap = Object.fromEntries(header.map((name, idx) => [name, idx]));
+              const hasUnitColumns = CSV_PROGRESS_COLUMNS.every((name) => indexMap[name] !== undefined);
+              const hasSingleUnitColumns = UNIT_CSV_COLUMNS.every((name) => indexMap[name] !== undefined);
+              const currentUnitKey = this.getCurrentUnitKey();
+              const nextRows = [];
+
+              if (hasUnitColumns) {
+                const pageMode = this.detectPageNumModeFromTable(table, indexMap, this.currentUnit, 'auto', currentUnitKey);
+                for (let i = 1; i < table.length; i += 1) {
+                  const line = table[i];
+                  if (!line?.length) continue;
+                  const unitKey = String(line[indexMap.unit] || '').trim();
+                  if (unitKey !== currentUnitKey) continue;
+                  nextRows.push(
+                    this.createAnnotationFromCsvLine(line, indexMap, {
+                      unitId: this.currentUnit,
+                      pageMode
+                    })
+                  );
+                }
+              } else if (hasSingleUnitColumns) {
+                const explicitMode =
+                  sourceLabel.includes('-annotations.csv') || sourceLabel.includes('legacy')
+                    ? 'relative'
+                    : 'auto';
+                const pageMode = this.detectPageNumModeFromTable(
+                  table,
+                  indexMap,
+                  this.currentUnit,
+                  explicitMode
+                );
+                for (let i = 1; i < table.length; i += 1) {
+                  const line = table[i];
+                  if (!line?.length) continue;
+                  nextRows.push(
+                    this.createAnnotationFromCsvLine(line, indexMap, {
+                      unitId: this.currentUnit,
+                      pageMode
+                    })
+                  );
+                }
+              } else {
+                return {
+                  ok: false,
+                  message: `${sourceLabel} 字段不匹配。需要总表字段（含 unit）或单元字段（${UNIT_CSV_COLUMNS.join(
+                    '、'
+                  )}）。`
+                };
+              }
+
+              this.annotationsByUnit[currentUnitKey] = nextRows;
+              this.cancelAppend(true);
+              this.annotationTextareaRefs = {};
+              this.saveLocalAnnotations();
+              this.hasUnsavedCsvChanges = false;
+              this.repaintCurrentUnitHighlights();
+              this.$nextTick(() => this.syncAllAnnotationTextareaHeights());
+              return { ok: true, imported: nextRows.length };
+            },
+            async tryLoadCurrentUnitCsvIfPresent() {
+              const unitFilename = this.getCurrentUnitFilename();
+              const candidates = [
+                `${DEFAULT_WORDLIST_DIR}/${unitFilename}`,
+                `${DEFAULT_WORDLIST_DIR}/unit${this.currentUnit}-annotations.csv`
+              ];
+
+              for (const unitPath of candidates) {
+                try {
+                  const response = await fetch(`${unitPath}?t=${Date.now()}`, {
+                    cache: 'no-store'
+                  });
+                  if (!response.ok) continue;
+                  const raw = await response.text();
+                  const sourceLabel =
+                    unitPath === candidates[1] ? `默认文件 ${unitPath}（legacy）` : `默认文件 ${unitPath}`;
+                  const result = this.importCurrentUnitFromCsvText(raw, sourceLabel);
+                  if (result.ok) {
+                    this.setStatus(`已自动载入 ${unitPath}（${result.imported} 条），可直接继续编辑。`);
+                    return;
+                  }
+                } catch {
+                  // 尝试下一个候选文件
+                }
+              }
+            },
+            deleteAnnotation(annotationId) {
+              const unitKey = String(this.currentUnit);
+              const rows = this.annotationsByUnit[unitKey] || [];
+              const idx = rows.findIndex((row) => row.id === annotationId);
+              if (idx < 0) return;
+
+              rows.splice(idx, 1);
+              if (this.appendTargetId === annotationId) {
+                this.cancelAppend(true);
+              }
+              delete this.annotationTextareaRefs[annotationId];
+              this.saveLocalAnnotations();
+              this.repaintCurrentUnitHighlights();
+              this.setStatus(`Unit ${this.currentUnit}：已删除 1 条标注，剩余 ${rows.length} 条。`);
+            },
+            findAnnotationByPoint(pageDiv, x, y) {
+              const rows = this.annotationsByUnit[String(this.currentUnit)] || [];
+              const pdfPageNum = Number(pageDiv.dataset.pageNumber || '0');
+              const pageRows = rows.filter(
+                (row) => this.toPdfPageNum(this.currentUnit, row.pageNum) === pdfPageNum
+              );
+
+              for (let i = pageRows.length - 1; i >= 0; i -= 1) {
+                const row = pageRows[i];
+                const rects = Array.isArray(row.rects) ? row.rects : [];
+                for (const rect of rects) {
+                  const inside =
+                    x >= rect.x &&
+                    x <= rect.x + rect.width &&
+                    y >= rect.y &&
+                    y <= rect.y + rect.height;
+                  if (inside) {
+                    return row;
+                  }
+                }
+              }
+
+              return null;
+            },
+            onPageDoubleClickForDelete(event, pageDiv) {
+              if (this.penEnabled) return;
+
+              const { x, y } = this.getRelativePoint(event, pageDiv);
+              const hit = this.findAnnotationByPoint(pageDiv, x, y);
+              if (!hit) return;
+
+              const shouldDelete = window.confirm('删除这条标注吗？');
+              if (!shouldDelete) return;
+              this.deleteAnnotation(hit.id);
+            },
+            clearNode(node) {
+              while (node.firstChild) node.removeChild(node.firstChild);
+            },
+            getRelativePoint(event, pageDiv) {
+              const box = pageDiv.getBoundingClientRect();
+              const rawX = event.clientX - box.left;
+              const rawY = event.clientY - box.top;
+              return {
+                x: Math.max(0, Math.min(rawX, box.width)),
+                y: Math.max(0, Math.min(rawY, box.height))
+              };
+            },
+            buildRectFromPoints(start, end) {
+              const left = Math.min(start.x, end.x);
+              const top = Math.min(start.y, end.y);
+              const right = Math.max(start.x, end.x);
+              const bottom = Math.max(start.y, end.y);
+              return {
+                left,
+                top,
+                right,
+                bottom,
+                width: right - left,
+                height: bottom - top
+              };
+            },
+            computeIntersectionArea(a, b) {
+              const left = Math.max(a.left, b.left);
+              const top = Math.max(a.top, b.top);
+              const right = Math.min(a.right, b.right);
+              const bottom = Math.min(a.bottom, b.bottom);
+              const width = right - left;
+              const height = bottom - top;
+              if (width <= 0 || height <= 0) return 0;
+              return width * height;
+            },
+            createDragBox(pageDiv) {
+              const box = document.createElement('div');
+              box.className = 'drag-select-box';
+              pageDiv.appendChild(box);
+              return box;
+            },
+            updateDragBox(boxEl, rect) {
+              if (!boxEl) return;
+              boxEl.style.left = `${rect.left}px`;
+              boxEl.style.top = `${rect.top}px`;
+              boxEl.style.width = `${rect.width}px`;
+              boxEl.style.height = `${rect.height}px`;
+            },
+            clearDragState() {
+              const state = this.dragState;
+              if (state?.moveHandler) {
+                document.removeEventListener('mousemove', state.moveHandler);
+              }
+              if (state?.upHandler) {
+                document.removeEventListener('mouseup', state.upHandler);
+              }
+              if (state?.dragBoxEl?.parentNode) {
+                state.dragBoxEl.parentNode.removeChild(state.dragBoxEl);
+              }
+              this.dragState = null;
+            },
+            tokenizeTextItem(item, viewport) {
+              const rawText = item?.str || '';
+              if (!rawText.trim()) return [];
+
+              const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+              const fontHeight = Math.hypot(tx[2], tx[3]);
+              const fullWidth = Math.max(0, item.width * viewport.scale);
+              if (fontHeight <= 0 || fullWidth <= 0) return [];
+
+              const baseX = tx[4];
+              const baseTop = tx[5] - fontHeight;
+              const segments = rawText.match(/\S+|\s+/g) || [];
+              const totalChars = Math.max(rawText.length, 1);
+              const unitWidth = fullWidth / totalChars;
+              const tokens = [];
+
+              let cursorX = baseX;
+              for (const seg of segments) {
+                const segWidth = unitWidth * seg.length;
+                if (/\S/.test(seg) && segWidth > 0.5) {
+                  tokens.push({
+                    text: seg,
+                    rect: {
+                      left: cursorX,
+                      top: baseTop,
+                      right: cursorX + segWidth,
+                      bottom: baseTop + fontHeight
+                    }
+                  });
+                }
+                cursorX += segWidth;
+              }
+              return tokens;
+            },
+            extractPageTokensFromTextContent(textContent, viewport) {
+              const tokens = [];
+              for (const item of textContent?.items || []) {
+                tokens.push(...this.tokenizeTextItem(item, viewport));
+              }
+              return tokens;
+            },
+            findHitTokens(tokens, selectionRect) {
+              const hits = [];
+              for (const token of tokens || []) {
+                const tokenRect = token.rect;
+                const tokenArea =
+                  Math.max(0, tokenRect.right - tokenRect.left) *
+                  Math.max(0, tokenRect.bottom - tokenRect.top);
+                if (tokenArea <= 0) continue;
+
+                const interArea = this.computeIntersectionArea(selectionRect, tokenRect);
+                const ratio = interArea / tokenArea;
+                if (ratio >= TOKEN_HIT_RATIO) {
+                  hits.push(token);
+                }
+              }
+              return hits;
+            },
+            sortTokensForPhrase(tokens) {
+              return [...tokens].sort((a, b) => {
+                const dy = a.rect.top - b.rect.top;
+                if (Math.abs(dy) > 4) return dy;
+                return a.rect.left - b.rect.left;
+              });
+            },
+            tokensToRects(tokens) {
+              return tokens.map((t) => ({
+                x: t.rect.left,
+                y: t.rect.top,
+                width: Math.max(0, t.rect.right - t.rect.left),
+                height: Math.max(0, t.rect.bottom - t.rect.top)
+              }));
+            },
+            onDragStart(event, pageDiv) {
+              if (!this.penEnabled || event.button !== 0) return;
+
+              event.preventDefault();
+              window.getSelection()?.removeAllRanges();
+              this.clearDragState();
+
+              const start = this.getRelativePoint(event, pageDiv);
+              const dragBoxEl = this.createDragBox(pageDiv);
+
+              const moveHandler = (moveEvent) => {
+                if (!this.dragState) return;
+                moveEvent.preventDefault();
+                const current = this.getRelativePoint(moveEvent, pageDiv);
+                this.dragState.current = current;
+                const rect = this.buildRectFromPoints(this.dragState.start, current);
+                this.updateDragBox(dragBoxEl, rect);
+              };
+
+              const upHandler = (upEvent) => {
+                if (!this.dragState) return;
+                upEvent.preventDefault();
+                const end = this.getRelativePoint(upEvent, pageDiv);
+                const finalRect = this.buildRectFromPoints(this.dragState.start, end);
+                this.finishDragSelect(pageDiv, finalRect);
+                this.clearDragState();
+              };
+
+              this.dragState = {
+                pageDiv,
+                start,
+                current: start,
+                dragBoxEl,
+                moveHandler,
+                upHandler
+              };
+              this.updateDragBox(dragBoxEl, {
+                left: start.x,
+                top: start.y,
+                width: 0,
+                height: 0
+              });
+
+              document.addEventListener('mousemove', moveHandler);
+              document.addEventListener('mouseup', upHandler);
+            },
+            finishDragSelect(pageDiv, finalRect) {
+              if (finalRect.width < 3 || finalRect.height < 3) return;
+
+              const allTokens = pageDiv.__tokens || [];
+              const hitTokens = this.findHitTokens(allTokens, finalRect);
+              if (!hitTokens.length) {
+                this.setStatus('该框选区域未命中文字，已忽略。');
+                return;
+              }
+
+              const sorted = this.sortTokensForPhrase(hitTokens);
+              const text = sorted.map((t) => t.text).join(' ').replace(/\s+/g, ' ').trim();
+              if (!text) return;
+
+              const rects = this.tokensToRects(sorted).filter((r) => r.width > 1 && r.height > 1);
+              if (!rects.length) return;
+
+              const pageNum = Number(pageDiv.dataset.pageNumber || '1');
+              const bookPageNum = this.toBookPageNum(this.currentUnit, pageNum);
+
+              if (this.appendTargetId) {
+                const ok = this.appendSelectionToAnnotation(
+                  this.appendTargetId,
+                  bookPageNum,
+                  text,
+                  rects
+                );
+                if (ok) {
+                  const targetId = this.appendTargetId;
+                  this.appendTargetId = null;
+                  this.setStatus(
+                    `已补录成功：新框选内容已追加到该条英文后方（ID: ${targetId.slice(0, 8)}...）。`
+                  );
+                }
+                return;
+              }
+
+              const row = {
+                id: crypto.randomUUID(),
+                pageNum: bookPageNum,
+                text,
+                sourceText: text,
+                rects,
+                pen: this.activePen,
+                zh: '',
+                createdAt: Date.now()
+              };
+
+              const unitKey = String(this.currentUnit);
+              this.annotationsByUnit[unitKey].push(row);
+              this.saveLocalAnnotations();
+              this.drawHighlightRects(pageDiv, rects, row);
+              this.$nextTick(() => this.syncAnnotationTextareaHeights(row.id));
+
+              this.setStatus(
+                `Unit ${this.currentUnit}：已标注 ${this.annotationsByUnit[unitKey].length} 条（分类：${this.getPenLabelById(row.pen)}，已保存到 localStorage）`
+              );
+            },
+            drawHighlightRects(pageDiv, rects, annotation = null) {
+              const highlightLayer = pageDiv.querySelector('.highlight-layer');
+              if (!highlightLayer) return;
+
+              const color = this.getPenColorById(annotation?.pen || PEN_PRESETS[0].id);
+
+              for (const rect of rects) {
+                const mark = document.createElement('div');
+                mark.className = 'highlight-rect';
+                mark.style.left = `${rect.x}px`;
+                mark.style.top = `${rect.y}px`;
+                mark.style.width = `${rect.width}px`;
+                mark.style.height = `${rect.height}px`;
+                mark.style.background = color;
+                highlightLayer.appendChild(mark);
+              }
+            },
+            repaintCurrentUnitHighlights() {
+              const container = this.$refs.pdfContainer;
+              const pages = container.querySelectorAll('.page-container');
+              pages.forEach((pageDiv) => {
+                const layer = pageDiv.querySelector('.highlight-layer');
+                if (layer) this.clearNode(layer);
+              });
+
+              const rows = this.annotationsByUnit[String(this.currentUnit)] || [];
+              for (const row of rows) {
+                const pdfPageNum = this.toPdfPageNum(this.currentUnit, row.pageNum);
+                const pageDiv = container.querySelector(
+                  `.page-container[data-page-number="${pdfPageNum}"]`
+                );
+                if (!pageDiv) continue;
+                this.drawHighlightRects(pageDiv, row.rects || [], row);
+              }
+            },
+            async renderPage(pdfDoc, pageNum, container) {
+              const page = await pdfDoc.getPage(pageNum);
+              const viewport = page.getViewport({ scale: SCALE });
+              const pixelRatio = window.devicePixelRatio || 1;
+
+              const pageDiv = document.createElement('div');
+              pageDiv.className = 'page-container';
+              pageDiv.dataset.pageNumber = String(pageNum);
+              pageDiv.style.width = `${viewport.width}px`;
+              pageDiv.style.height = `${viewport.height}px`;
+
+              const canvas = document.createElement('canvas');
+              const context = canvas.getContext('2d');
+              canvas.width = Math.floor(viewport.width * pixelRatio);
+              canvas.height = Math.floor(viewport.height * pixelRatio);
+              canvas.style.width = `${viewport.width}px`;
+              canvas.style.height = `${viewport.height}px`;
+
+              const renderContext = {
+                canvasContext: context,
+                transform: pixelRatio !== 1 ? [pixelRatio, 0, 0, pixelRatio, 0, 0] : null,
+                viewport
+              };
+              await page.render(renderContext).promise;
+              pageDiv.appendChild(canvas);
+
+              const highlightLayer = document.createElement('div');
+              highlightLayer.className = 'highlight-layer';
+              pageDiv.appendChild(highlightLayer);
+
+              const textLayerDiv = document.createElement('div');
+              textLayerDiv.className = 'textLayer';
+              textLayerDiv.style.width = `${viewport.width}px`;
+              textLayerDiv.style.height = `${viewport.height}px`;
+
+              const textContent = await page.getTextContent();
+              pageDiv.__tokens = this.extractPageTokensFromTextContent(textContent, viewport);
+              const task = pdfjsLib.renderTextLayer({
+                textContentSource: textContent,
+                container: textLayerDiv,
+                viewport,
+                textDivs: []
+              });
+              if (task?.promise) {
+                await task.promise;
+              } else {
+                await task;
+              }
+
+              textLayerDiv.addEventListener('mousedown', (event) => this.onDragStart(event, pageDiv));
+              textLayerDiv.addEventListener('dblclick', (event) =>
+                this.onPageDoubleClickForDelete(event, pageDiv)
+              );
+
+              pageDiv.appendChild(textLayerDiv);
+              container.appendChild(pageDiv);
+            },
+            async renderPdfForUnit(unitId) {
+              const container = this.$refs.pdfContainer;
+              this.clearNode(container);
+
+              const path = this.unitPdfPath(unitId);
+              this.setStatus(`正在加载 Unit ${unitId}：${path}`);
+
+              const loadingTask = pdfjsLib.getDocument({ url: path });
+              const pdfDoc = await loadingTask.promise;
+
+              this.setStatus(
+                `Unit ${unitId} 加载成功，共 ${pdfDoc.numPages} 页，正在渲染...`
+              );
+
+              for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum += 1) {
+                await this.renderPage(pdfDoc, pageNum, container);
+              }
+
+              this.repaintCurrentUnitHighlights();
+              this.setStatus(`Unit ${unitId} 渲染完成。当前标注 ${this.currentUnitCount} 条。`);
+            },
+            async onUnitChange() {
+              this.cancelAppend(true);
+              await this.renderPdfForUnit(this.currentUnit);
+              await this.tryLoadCurrentUnitCsvIfPresent();
+              this.$nextTick(() => this.syncAllAnnotationTextareaHeights());
+            },
+            clearCurrentUnit() {
+              const key = String(this.currentUnit);
+              this.annotationsByUnit[key] = [];
+              this.cancelAppend(true);
+              this.annotationTextareaRefs = {};
+              this.saveLocalAnnotations();
+              this.repaintCurrentUnitHighlights();
+              this.setStatus(`Unit ${this.currentUnit} 标注已清空。`);
+            },
+            onEsc(event) {
+              if (event.key !== 'Escape') return;
+
+              if (this.appendTargetId) {
+                this.cancelAppend();
+                return;
+              }
+
+              if (this.penEnabled) {
+                this.clearDragState();
+                this.penEnabled = false;
+                this.isSidebarExpanded = false;
+                this.setStatus('已按 Esc 退出荧光笔模式。');
+              }
+            }
+          },
+          async mounted() {
+            if (!window.pdfjsLib) {
+              this.setStatus('PDF.js 加载失败，请检查网络。');
+              return;
+            }
+
+            pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
+            this.loadLocalAnnotations();
+            window.addEventListener('keydown', this.onEsc);
+            this.startAutoSaveTimer();
+
+            try {
+              await this.renderPdfForUnit(this.currentUnit);
+              await this.tryLoadCurrentUnitCsvIfPresent();
+            } catch (error) {
+              this.setStatus(`加载失败：${String(error?.message || error)}`);
+              console.error(error);
+            }
+          },
+          beforeUnmount() {
+            this.clearDragState();
+            window.removeEventListener('keydown', this.onEsc);
+            this.stopAutoSaveTimer();
+          },
+          updated() {
+            this.syncAllAnnotationTextareaHeights();
+          }
+        }).mount('#app');
+      })();
+    </script>
+  </body>
+</html>
