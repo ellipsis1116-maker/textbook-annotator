@@ -292,6 +292,7 @@
         const AUTO_SAVE_INTERVAL_MS = 3 * 60 * 1000;
         const API_BASE = '/api';
         const UNIT_CSV_COLUMNS = ['id', 'pen', 'pageNum', 'text', 'sourceText', 'zh', 'createdAt', 'rects'];
+        const CLEAN_CSV_COLUMNS = ['类型', '序号', '英文', '中文'];
         const UNIT_PDF_PATHS = {
           1: '/pdfs/unit1.pdf',
           2: '/pdfs/unit2.pdf',
@@ -642,6 +643,7 @@
 
               return {
                 ok: true,
+                exists: payload.exists !== false,
                 imported: cloudRows.length
               };
             },
@@ -1079,10 +1081,28 @@
               const header = table[0].map((h) => String(h || '').trim());
               const indexMap = Object.fromEntries(header.map((name, idx) => [name, idx]));
               const hasSingleUnitColumns = UNIT_CSV_COLUMNS.every((name) => indexMap[name] !== undefined);
+              const hasCleanColumns = CLEAN_CSV_COLUMNS.every((name) => indexMap[name] !== undefined);
               const currentUnitKey = this.getCurrentUnitKey();
               const nextRows = [];
 
-              if (hasSingleUnitColumns) {
+              if (hasCleanColumns) {
+                const defaultPageNum = this.getUnitPageRange(this.currentUnit).start;
+                for (let i = 1; i < table.length; i += 1) {
+                  const line = table[i];
+                  if (!line?.length) continue;
+                  const text = String(line[indexMap['英文']] || '');
+                  nextRows.push({
+                    id: crypto.randomUUID(),
+                    pen: this.normalizePenId(String(line[indexMap['类型']] || '')),
+                    pageNum: defaultPageNum,
+                    text,
+                    sourceText: text,
+                    zh: String(line[indexMap['中文']] || ''),
+                    createdAt: Date.now(),
+                    rects: []
+                  });
+                }
+              } else if (hasSingleUnitColumns) {
                 const explicitMode =
                   sourceLabel.includes('-annotations.csv') || sourceLabel.includes('legacy')
                     ? 'relative'
@@ -1124,11 +1144,35 @@
 
             async tryLoadCurrentUnitCsvIfPresent() {
               const cloudResult = await this.loadUnitCsvFromCloud(this.currentUnit);
-              if (cloudResult.ok) {
+              if (cloudResult.ok && cloudResult.exists) {
                 this.setStatus(`已自动载入云端 Unit ${this.currentUnit}（${cloudResult.imported} 条）。`);
                 return;
               }
-              this.setStatus(cloudResult.message || `Unit ${this.currentUnit} 云端数据读取失败。`);
+
+              const unitNum = Number(this.currentUnit);
+              const candidates = [
+                `/wordlist/unit${unitNum}-annotations.csv`,
+                `/wordlist/Unit${unitNum}.csv`,
+                `/wordlist/unit${unitNum}.csv`,
+                `/wordlist/Unit${unitNum}-annotations.csv`
+              ];
+              for (const path of candidates) {
+                try {
+                  const response = await fetch(path, { cache: 'no-store' });
+                  if (!response.ok) continue;
+                  const result = this.importCurrentUnitFromCsvText(await response.text(), path);
+                  if (result.ok) {
+                    this.setStatus(`已载入本地初始数据 Unit ${unitNum}（${result.imported} 条）。`);
+                    return;
+                  }
+                } catch (error) {
+                  console.warn(`读取本地初始文件失败：${path}`, error);
+                }
+              }
+
+              this.setStatus(
+                cloudResult.message || `Unit ${this.currentUnit} 暂无云端或本地初始数据。`
+              );
             },
             deleteAnnotation(annotationId) {
               const unitKey = String(this.currentUnit);

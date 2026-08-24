@@ -1,14 +1,10 @@
 const UNIT_COUNT = 8;
 export const UNIT_IDS = Array.from({ length: UNIT_COUNT }, (_, i) => i + 1);
 export const UNIT_CSV_COLUMNS = [
-  'id',
-  'pen',
-  'pageNum',
-  'text',
-  'sourceText',
-  'zh',
-  'createdAt',
-  'rects'
+  '类型',
+  '序号',
+  '英文',
+  '中文'
 ];
 
 export function json(data, init = {}) {
@@ -78,17 +74,16 @@ export function escapeCsvField(value) {
 
 export function annotationsToCsvText(annotations) {
   const rows = normalizeAnnotations(annotations);
+  const typeIndexes = {};
   const lines = [UNIT_CSV_COLUMNS.map((item) => escapeCsvField(item)).join(',')];
   for (const row of rows) {
+    const type = String(row.pen || '');
+    typeIndexes[type] = (typeIndexes[type] || 0) + 1;
     const cols = [
-      row.id,
-      row.pen,
-      row.pageNum,
+      type,
+      typeIndexes[type],
       row.text,
-      row.sourceText,
-      row.zh,
-      row.createdAt,
-      JSON.stringify(Array.isArray(row.rects) ? row.rects : [])
+      row.zh
     ];
     lines.push(cols.map((item) => escapeCsvField(item)).join(','));
   }
