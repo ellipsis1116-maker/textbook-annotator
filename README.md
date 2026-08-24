@@ -25,16 +25,13 @@
 
 ### 1) 绑定 KV Namespace
 
-在 `wrangler.toml` 中已经预留：
+请在 Cloudflare Dashboard 中完成绑定，不要在本地配置文件中填写 Namespace ID：
 
-```toml
-[[kv_namespaces]]
-binding = "ANNOTATION_KV"
-id = "REPLACE_WITH_PRODUCTION_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
-```
-
-请替换为你实际的 KV Namespace ID。
+1. 打开 **Workers & Pages**，选择对应的 Pages 项目。
+2. 进入 **Settings** → **Functions** → **KV namespace bindings**。
+3. 添加 KV Namespace，变量名填写 `ANNOTATION_KV`，选择生产环境的 Namespace。
+4. 如需预览部署，再切换到 Preview 环境并绑定对应的 KV Namespace。
+5. 保存后重新部署项目，使 Pages Functions 使用新的绑定。
 
 ## 本地运行
 
