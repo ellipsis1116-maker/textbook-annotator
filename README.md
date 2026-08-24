@@ -9,11 +9,32 @@
 
 ## 当前数据与标注流程
 
-- PDF：`public/unit1.pdf` ~ `public/unit8.pdf`
-- 单元 CSV（推荐命名）：`public/wordlist/unitN.csv`
-- 兼容旧命名：`public/wordlist/unitN-annotations.csv`
-- 自动加载顺序：先尝试 `unitN.csv`，找不到再尝试 `unitN-annotations.csv`
+- PDF：`public/pdfs/unit1.pdf` ~ `public/pdfs/unit8.pdf`
+- 标注数据存储在 Cloudflare KV。
+- 本地 `localStorage` 作为兜底缓存。
+- 自动加载顺序：优先尝试从 KV 加载，失败则尝试从 `/wordlist/unitN-annotations.csv` 等静态文件加载（仅限 `index.html`）。
 - `pageNum` 统一为**课本真实页码**（非单元内相对页码）
+
+## Cloudflare KV 云端持久化（新增）
+
+- 前端会优先通过 Pages Functions 读取/写入 KV：`/api/annotations?unit=N`
+- 导出接口：
+  - `GET /api/export-csv?unit=N`：从 KV 读取 JSON 标注并实时转换为 CSV 下载。
+- 本地 `localStorage` 保留为兜底缓存（用于离线或云端不可达时临时编辑）。
+- `/dashboard.html` 提供公开的单元选择、刷新统计和 CSV 下载入口。
+
+### 1) 绑定 KV Namespace
+
+在 `wrangler.toml` 中已经预留：
+
+```toml
+[[kv_namespaces]]
+binding = "ANNOTATION_KV"
+id = "REPLACE_WITH_PRODUCTION_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
+```
+
+请替换为你实际的 KV Namespace ID。
 
 ## 本地运行
 

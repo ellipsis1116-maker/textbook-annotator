@@ -160,13 +160,23 @@
           保存
         </button>
 
-        <span class="text-xs text-slate-500 ml-auto">
-          当前单元标注 {{ currentUnitCount }} 条（localStorage）
+        <a
+          href="/dashboard.html"
+          class="text-xs rounded px-2 py-1 border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 ml-auto"
+          target="_blank"
+          rel="noopener"
+        >
+          打开公开 Dashboard
+        </a>
+
+        <span class="text-xs text-slate-500">
+          当前单元标注 {{ currentUnitCount }} 条（KV 云端 + localStorage 兜底）
         </span>
       </header>
 
       <main class="max-w-[1400px] mx-auto px-3 py-3">
         <div class="text-xs text-slate-600 mb-2">{{ status }}</div>
+
         <div
           class="grid grid-cols-1 gap-3 items-start"
           :class="isSidebarExpanded ? 'lg:grid-cols-[1fr_310px]' : 'lg:grid-cols-1'"
@@ -280,19 +290,8 @@
         const STORAGE_KEY = 'textbook-annotator:annotations:v1';
         const TOKEN_HIT_RATIO = 0.3;
         const AUTO_SAVE_INTERVAL_MS = 3 * 60 * 1000;
-        const CSV_PROGRESS_COLUMNS = [
-          'unit',
-          'id',
-          'pen',
-          'pageNum',
-          'text',
-          'sourceText',
-          'zh',
-          'createdAt',
-          'rects'
-        ];
+        const API_BASE = '/api';
         const UNIT_CSV_COLUMNS = ['id', 'pen', 'pageNum', 'text', 'sourceText', 'zh', 'createdAt', 'rects'];
-        const DEFAULT_WORDLIST_DIR = 'wordlist';
         const UNIT_PAGE_RANGES = {
           1: [8, 19],
           2: [20, 31],
@@ -366,7 +365,6 @@
               annotationsByUnit: this.createEmptyUnitMap(),
               annotationTextareaRefs: {},
               appendTargetId: null,
-              csvFileHandlesByUnit: {},
               autoSaveTimerId: null,
               hasUnsavedCsvChanges: false,
               autoSaveHintShown: false,
@@ -424,6 +422,9 @@
           methods: {
             createEmptyUnitMap() {
               return Object.fromEntries(Array.from({ length: 8 }, (_, i) => [String(i + 1), []]));
+            },
+            getApiUrl(path) {
+              return `${API_BASE}${path}`;
             },
             setStatus(message) {
               this.status = message;
@@ -492,7 +493,7 @@
               return true;
             },
             unitPdfPath(unitId) {
-              return `unit${unitId}.pdf`;
+              return `/pdfs/unit${unitId}.pdf`;
             },
             loadLocalAnnotations() {
               try {
@@ -533,6 +534,87 @@
             saveLocalAnnotations() {
               localStorage.setItem(STORAGE_KEY, JSON.stringify(this.annotationsByUnit));
               this.hasUnsavedCsvChanges = true;
+            },
+
+            async saveUnitCsvToCloud(unitId = this.currentUnit) {
+              const unitNum = Number(unitId);
+              if (!Number.isFinite(unitNum) || unitNum <= 0) {
+                return { ok: false, message: 'unit 参数无效。' };
+              }
+
+              const annotations = this.annotationsByUnit[String(unitNum)] || [];
+              const response = await fetch(this.getApiUrl('/annotations'), {
+                method: 'POST',
+                headers: {
+                  'content-type': 'application/json'
+                },
+                body: JSON.stringify({
+                  unit: unitNum,
+                  annotations
+                })
+              });
+
+              let payload = null;
+              try {
+                payload = await response.json();
+              } catch {
+                payload = null;
+              }
+
+              if (!response.ok || !payload?.ok) {
+                return {
+                  ok: false,
+                  message: payload?.error || `云端保存失败（HTTP ${response.status}）`
+                };
+              }
+
+              return {
+                ok: true,
+                total: Number(payload?.total || 0),
+                updatedAt: payload?.updatedAt || null
+              };
+            },
+            async loadUnitCsvFromCloud(unitId = this.currentUnit) {
+              const unitNum = Number(unitId);
+              if (!Number.isFinite(unitNum) || unitNum <= 0) {
+                return { ok: false, message: 'unit 参数无效。' };
+              }
+
+              const response = await fetch(
+                `${this.getApiUrl('/annotations')}?unit=${encodeURIComponent(String(unitNum))}`,
+                {
+                  method: 'GET',
+                  cache: 'no-store'
+                }
+              );
+
+              let payload = null;
+              try {
+                payload = await response.json();
+              } catch {
+                payload = null;
+              }
+
+              if (!response.ok || !payload?.ok) {
+                return {
+                  ok: false,
+                  message: payload?.error || `云端读取失败（HTTP ${response.status}）`
+                };
+              }
+
+              const cloudRows = this.normalizeUnitRowsPageNums(unitNum, payload?.annotations || [], 'auto');
+              this.annotationsByUnit[String(unitNum)] = cloudRows;
+              this.cancelAppend(true);
+              this.annotationTextareaRefs = {};
+              this.saveLocalAnnotations();
+              this.hasUnsavedCsvChanges = false;
+              this.repaintCurrentUnitHighlights();
+              this.$nextTick(() => this.syncAllAnnotationTextareaHeights());
+
+              return {
+                ok: true,
+                imported: cloudRows.length
+              };
             },
             normalizePenId(penId) {
               return this.pens.some((p) => p.id === penId) ? penId : PEN_PRESETS[0].id;
@@ -691,11 +773,8 @@
             getCurrentUnitKey() {
               return String(this.currentUnit);
             },
-            getCurrentUnitFilename() {
-              return `unit${this.currentUnit}.csv`;
-            },
-            getCurrentUnitRelativePath() {
-              return `${DEFAULT_WORDLIST_DIR}/${this.getCurrentUnitFilename()}`;
+            getUnitKey(unitId) {
+              return String(Number(unitId));
             },
             getUnitPageRange(unitId = this.currentUnit) {
               const range = UNIT_PAGE_RANGES[Number(unitId)] || [1, 1];
@@ -726,22 +805,13 @@
               if (page >= 1 && page <= length) {
                 return page;
               }
-              return page;
-            },
-            getUnitHandle(unitKey) {
-              return this.csvFileHandlesByUnit[unitKey] || null;
-            },
-            setUnitHandle(unitKey, handle) {
-              this.csvFileHandlesByUnit = {
-                ...this.csvFileHandlesByUnit,
-                [unitKey]: handle
               };
             },
             getProgressCsvFilename() {
               return 'all-progress.csv';
             },
-            buildCurrentUnitRows() {
-              const unitKey = this.getCurrentUnitKey();
+            buildUnitRows(unitId = this.currentUnit) {
+              const unitKey = this.getUnitKey(unitId);
               const rows = this.annotationsByUnit[unitKey] || [];
               const lines = [];
               for (const row of rows) {
@@ -759,46 +829,18 @@
               }
               return lines;
             },
-            generateCurrentUnitCsvText() {
+            buildCurrentUnitRows() {
+              return this.buildUnitRows(this.currentUnit);
+            },
+            generateUnitCsvText(unitId = this.currentUnit) {
               const lines = [UNIT_CSV_COLUMNS.map((cell) => this.escapeCsvField(cell)).join(',')];
-              for (const row of this.buildCurrentUnitRows()) {
+              for (const row of this.buildUnitRows(unitId)) {
                 lines.push(row.map((cell) => this.escapeCsvField(cell)).join(','));
               }
               return `\uFEFF${lines.join('\r\n')}`;
             },
-            buildProgressRows() {
-              const lines = [];
-              for (const unit of this.units) {
-                const unitKey = String(unit);
-                const rows = this.annotationsByUnit[unitKey] || [];
-                for (const row of rows) {
-                  const rects = Array.isArray(row?.rects) ? row.rects : [];
-                  lines.push([
-                    unitKey,
-                    String(row?.id || ''),
-                    this.normalizePenId(row?.pen),
-                    Number.isFinite(Number(row?.pageNum)) ? Number(row.pageNum) : '',
-                    row?.text || '',
-                    row?.sourceText || '',
-                    row?.zh || '',
-                    Number.isFinite(Number(row?.createdAt)) ? Number(row.createdAt) : '',
-                    JSON.stringify(rects)
-                  ]);
-                }
-              }
-              return lines;
-            },
-            generateProgressCsvText() {
-              const lines = [CSV_PROGRESS_COLUMNS.map((cell) => this.escapeCsvField(cell)).join(',')];
-              for (const row of this.buildProgressRows()) {
-                lines.push(row.map((cell) => this.escapeCsvField(cell)).join(','));
-              }
-              return `\uFEFF${lines.join('\r\n')}`;
-            },
-            async writeCsvToHandle(handle, csvText) {
-              const writable = await handle.createWritable();
-              await writable.write(csvText);
-              await writable.close();
+            generateCurrentUnitCsvText() {
+              return this.generateUnitCsvText(this.currentUnit);
             },
             downloadCsvBackup(csvText, filename) {
               const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
@@ -811,48 +853,32 @@
               document.body.removeChild(link);
               URL.revokeObjectURL(url);
             },
+            downloadUnitCsv(unitId) {
+              const unitNum = Number(unitId);
+              if (!Number.isFinite(unitNum) || unitNum <= 0) return;
+              const link = document.createElement('a');
+              link.href = `${this.getApiUrl('/export-csv')}?unit=${encodeURIComponent(String(unitNum))}`;
+              link.target = '_blank';
+              link.rel = 'noopener';
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              this.setStatus(`已请求下载 Unit ${unitNum} 的云端 CSV。`);
+            },
             async saveCurrentUnitCsvManual() {
-              const unitKey = this.getCurrentUnitKey();
-              const unitCount = (this.annotationsByUnit[unitKey] || []).length;
-              const csvText = this.generateCurrentUnitCsvText();
-              const unitFilename = this.getCurrentUnitFilename();
-              const unitPath = this.getCurrentUnitRelativePath();
-              const pickerSupported =
-                typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function';
-
               try {
-                if (pickerSupported) {
-                  let handle = this.getUnitHandle(unitKey);
-                  if (!handle) {
-                    handle = await window.showSaveFilePicker({
-                      suggestedName: unitFilename,
-                      startIn: 'documents',
-                      types: [
-                        {
-                          description: 'CSV 文件',
-                          accept: { 'text/csv': ['.csv'] }
-                        }
-                      ]
-                    });
-                    this.setUnitHandle(unitKey, handle);
-                  }
-                  await this.writeCsvToHandle(handle, csvText);
-                  this.hasUnsavedCsvChanges = false;
-                  this.autoSaveHintShown = false;
-                  this.setStatus(
-                    `保存成功：Unit ${this.currentUnit} 已写入 ${unitFilename}（${unitCount} 条）。建议放在 public/${unitPath}；后续每 3 分钟自动保存到同一文件。`
-                  );
+                const result = await this.saveUnitCsvToCloud(this.currentUnit);
+                if (!result.ok) {
+                  this.setStatus(result.message || '云端保存失败。');
                   return;
                 }
-
-                this.downloadCsvBackup(csvText, unitFilename);
                 this.hasUnsavedCsvChanges = false;
                 this.autoSaveHintShown = false;
                 this.setStatus(
-                  `已下载 Unit ${this.currentUnit} 的 CSV（${unitCount} 条，建议文件名 ${unitPath}）。当前浏览器不支持自动写回文件，请手动覆盖保存。`
+                  `保存成功：Unit ${this.currentUnit} 已写入 Cloudflare KV（${result.total} 条）。`
                 );
               } catch (error) {
-                this.setStatus(`保存失败：${String(error?.message || error)}`);
+                this.setStatus(`云端保存失败：${String(error?.message || error)}`);
               }
             },
             startAutoSaveTimer() {
@@ -869,23 +895,16 @@
             },
             async autoSaveTick() {
               if (!this.hasUnsavedCsvChanges) return;
-              const unitKey = this.getCurrentUnitKey();
-              const handle = this.getUnitHandle(unitKey);
-              if (!handle) {
-                if (!this.autoSaveHintShown) {
-                  this.autoSaveHintShown = true;
-                  this.setStatus('检测到未保存修改：请先点击一次“保存”，之后将每 3 分钟自动保存当前单元。');
-                }
-                return;
-              }
-
               try {
-                const csvText = this.generateCurrentUnitCsvText();
-                await this.writeCsvToHandle(handle, csvText);
+                const result = await this.saveUnitCsvToCloud(this.currentUnit);
+                if (!result.ok) {
+                  this.setStatus(result.message || '自动保存失败。');
+                  return;
+                }
                 this.hasUnsavedCsvChanges = false;
-                this.setStatus(`自动保存完成（Unit ${this.currentUnit} CSV 已写入）。`);
+                this.setStatus(`自动保存完成（Unit ${this.currentUnit} 已同步到云端）。`);
               } catch (error) {
-                this.setStatus(`自动保存失败：${String(error?.message || error)}；请手动点击“保存”。`);
+                this.setStatus(`自动保存失败：${String(error?.message || error)}；请稍后重试。`);
               }
             },
             parseCsvText(csvText) {
@@ -1022,57 +1041,6 @@
                 rects
               };
             },
-            importProgressFromCsvText(csvText, sourceLabel = 'CSV') {
-              const table = this.parseCsvText(csvText.replace(/^\uFEFF/, ''));
-              if (!table.length) {
-                return { ok: false, message: `${sourceLabel} 内容为空。` };
-              }
-
-              const header = table[0].map((h) => String(h || '').trim());
-              const indexMap = Object.fromEntries(header.map((name, idx) => [name, idx]));
-              const required = [...CSV_PROGRESS_COLUMNS];
-              const missing = required.filter((name) => indexMap[name] === undefined);
-              if (missing.length) {
-                return { ok: false, message: `${sourceLabel} 缺少字段 ${missing.join('、')}。` };
-              }
-
-              const merged = this.createEmptyUnitMap();
-              let imported = 0;
-              for (let i = 1; i < table.length; i += 1) {
-                const line = table[i];
-                if (!line?.length) continue;
-
-                const unitKey = String(line[indexMap.unit] || '').trim();
-                if (!Object.prototype.hasOwnProperty.call(merged, unitKey)) continue;
-
-                const unitId = Number(unitKey);
-                const pageMode = this.detectPageNumModeFromTable(
-                  table,
-                  indexMap,
-                  unitId,
-                  'auto',
-                  unitKey
-                );
-                merged[unitKey].push(
-                  this.createAnnotationFromCsvLine(line, indexMap, { unitId, pageMode })
-                );
-                imported += 1;
-              }
-
-              this.annotationsByUnit = Object.fromEntries(
-                Object.entries(merged).map(([unitKey, rows]) => {
-                  const unitId = Number(unitKey);
-                  return [unitKey, this.normalizeUnitRowsPageNums(unitId, rows, 'auto')];
-                })
-              );
-              this.cancelAppend(true);
-              this.annotationTextareaRefs = {};
-              this.saveLocalAnnotations();
-              this.hasUnsavedCsvChanges = false;
-              this.repaintCurrentUnitHighlights();
-              this.$nextTick(() => this.syncAllAnnotationTextareaHeights());
-              return { ok: true, imported };
-            },
             importCurrentUnitFromCsvText(csvText, sourceLabel = 'CSV') {
               const table = this.parseCsvText(csvText.replace(/^\uFEFF/, ''));
               if (!table.length) {
@@ -1081,26 +1049,11 @@
 
               const header = table[0].map((h) => String(h || '').trim());
               const indexMap = Object.fromEntries(header.map((name, idx) => [name, idx]));
-              const hasUnitColumns = CSV_PROGRESS_COLUMNS.every((name) => indexMap[name] !== undefined);
               const hasSingleUnitColumns = UNIT_CSV_COLUMNS.every((name) => indexMap[name] !== undefined);
               const currentUnitKey = this.getCurrentUnitKey();
               const nextRows = [];
 
-              if (hasUnitColumns) {
-                const pageMode = this.detectPageNumModeFromTable(table, indexMap, this.currentUnit, 'auto', currentUnitKey);
-                for (let i = 1; i < table.length; i += 1) {
-                  const line = table[i];
-                  if (!line?.length) continue;
-                  const unitKey = String(line[indexMap.unit] || '').trim();
-                  if (unitKey !== currentUnitKey) continue;
-                  nextRows.push(
-                    this.createAnnotationFromCsvLine(line, indexMap, {
-                      unitId: this.currentUnit,
-                      pageMode
-                    })
-                  );
-                }
-              } else if (hasSingleUnitColumns) {
+              if (hasSingleUnitColumns) {
                 const explicitMode =
                   sourceLabel.includes('-annotations.csv') || sourceLabel.includes('legacy')
                     ? 'relative'
@@ -1124,7 +1077,7 @@
               } else {
                 return {
                   ok: false,
-                  message: `${sourceLabel} 字段不匹配。需要总表字段（含 unit）或单元字段（${UNIT_CSV_COLUMNS.join(
+                  message: `${sourceLabel} 字段不匹配。需要单元字段（${UNIT_CSV_COLUMNS.join(
                     '、'
                   )}）。`
                 };
@@ -1139,31 +1092,14 @@
               this.$nextTick(() => this.syncAllAnnotationTextareaHeights());
               return { ok: true, imported: nextRows.length };
             },
-            async tryLoadCurrentUnitCsvIfPresent() {
-              const unitFilename = this.getCurrentUnitFilename();
-              const candidates = [
-                `${DEFAULT_WORDLIST_DIR}/${unitFilename}`,
-                `${DEFAULT_WORDLIST_DIR}/unit${this.currentUnit}-annotations.csv`
-              ];
 
-              for (const unitPath of candidates) {
-                try {
-                  const response = await fetch(`${unitPath}?t=${Date.now()}`, {
-                    cache: 'no-store'
-                  });
-                  if (!response.ok) continue;
-                  const raw = await response.text();
-                  const sourceLabel =
-                    unitPath === candidates[1] ? `默认文件 ${unitPath}（legacy）` : `默认文件 ${unitPath}`;
-                  const result = this.importCurrentUnitFromCsvText(raw, sourceLabel);
-                  if (result.ok) {
-                    this.setStatus(`已自动载入 ${unitPath}（${result.imported} 条），可直接继续编辑。`);
-                    return;
-                  }
-                } catch {
-                  // 尝试下一个候选文件
-                }
+            async tryLoadCurrentUnitCsvIfPresent() {
+              const cloudResult = await this.loadUnitCsvFromCloud(this.currentUnit);
+              if (cloudResult.ok) {
+                this.setStatus(`已自动载入云端 Unit ${this.currentUnit}（${cloudResult.imported} 条）。`);
+                return;
               }
+              this.setStatus(cloudResult.message || `Unit ${this.currentUnit} 云端数据读取失败。`);
             },
             deleteAnnotation(annotationId) {
               const unitKey = String(this.currentUnit);
