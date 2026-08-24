@@ -292,6 +292,16 @@
         const AUTO_SAVE_INTERVAL_MS = 3 * 60 * 1000;
         const API_BASE = '/api';
         const UNIT_CSV_COLUMNS = ['id', 'pen', 'pageNum', 'text', 'sourceText', 'zh', 'createdAt', 'rects'];
+        const UNIT_PDF_PATHS = {
+          1: '/pdfs/unit1.pdf',
+          2: '/pdfs/unit2.pdf',
+          3: '/pdfs/unit3.pdf',
+          4: '/pdfs/unit4.pdf',
+          5: '/pdfs/unit5.pdf',
+          6: '/pdfs/unit6.pdf',
+          7: '/pdfs/unit7.pdf',
+          8: '/pdfs/unit8.pdf'
+        };
         const UNIT_PAGE_RANGES = {
           1: [8, 19],
           2: [20, 31],
@@ -366,6 +376,9 @@
               annotationTextareaRefs: {},
               appendTargetId: null,
               autoSaveTimerId: null,
+              pdfLoadingTask: null,
+              pdfDocument: null,
+              pdfRenderGeneration: 0,
               hasUnsavedCsvChanges: false,
               autoSaveHintShown: false,
               isSidebarExpanded: true
@@ -493,7 +506,23 @@
               return true;
             },
             unitPdfPath(unitId) {
-              return `/pdfs/unit${unitId}.pdf`;
+              return UNIT_PDF_PATHS[Number(unitId)] || UNIT_PDF_PATHS[1];
+            },
+            async destroyCurrentPdf() {
+              this.pdfRenderGeneration += 1;
+              const loadingTask = this.pdfLoadingTask;
+              const pdfDocument = this.pdfDocument;
+              this.pdfLoadingTask = null;
+              this.pdfDocument = null;
+
+              if (loadingTask?.destroy) {
+                await loadingTask.destroy();
+              }
+              if (pdfDocument?.destroy) {
+                await pdfDocument.destroy();
+              }
+
+              this.clearNode(this.$refs.pdfContainer);
             },
             loadLocalAnnotations() {
               try {
@@ -1484,20 +1513,26 @@
             },
             async renderPdfForUnit(unitId) {
               const container = this.$refs.pdfContainer;
-              this.clearNode(container);
+              await this.destroyCurrentPdf();
+              const renderGeneration = this.pdfRenderGeneration;
 
               const path = this.unitPdfPath(unitId);
               this.setStatus(`正在加载 Unit ${unitId}：${path}`);
 
               try {
                 const loadingTask = pdfjsLib.getDocument({ url: path });
+                this.pdfLoadingTask = loadingTask;
                 const pdfDoc = await loadingTask.promise;
+                this.pdfDocument = pdfDoc;
+                this.pdfLoadingTask = null;
+                if (renderGeneration !== this.pdfRenderGeneration) return false;
 
                 this.setStatus(
                   `Unit ${unitId} 加载成功，共 ${pdfDoc.numPages} 页，正在渲染...`
                 );
 
                 for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum += 1) {
+                  if (renderGeneration !== this.pdfRenderGeneration) return false;
                   await this.renderPage(pdfDoc, pageNum, container);
                 }
 
@@ -1505,7 +1540,10 @@
                 this.setStatus(`Unit ${unitId} 渲染完成。当前标注 ${this.currentUnitCount} 条。`);
                 return true;
               } catch (error) {
+                if (renderGeneration !== this.pdfRenderGeneration) return false;
                 console.error(`Unit ${unitId} PDF 加载或渲染失败：`, error);
+                this.pdfLoadingTask = null;
+                this.pdfDocument = null;
                 this.clearNode(container);
                 this.setStatus(`Unit ${unitId} PDF 加载失败，请检查文件路径或网络后重试。`);
                 return false;
@@ -1513,6 +1551,7 @@
             },
             async onUnitChange() {
               this.cancelAppend(true);
+              await this.destroyCurrentPdf();
               await this.renderPdfForUnit(this.currentUnit);
               await this.tryLoadCurrentUnitCsvIfPresent();
               this.$nextTick(() => this.syncAllAnnotationTextareaHeights());
@@ -1563,6 +1602,7 @@
           },
           beforeUnmount() {
             this.clearDragState();
+            this.destroyCurrentPdf();
             window.removeEventListener('keydown', this.onEsc);
             this.stopAutoSaveTimer();
           },
