@@ -7,13 +7,13 @@
 
     <link
       rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.css"
+      href="https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.css"
     />
 
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/vue/3.3.4/vue.global.prod.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.js"></script>
 
     <style>
       body {
@@ -285,7 +285,7 @@
         const { createApp } = Vue;
 
         const PDF_WORKER_URL =
-          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          'https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         const SCALE = 1.5;
         const STORAGE_KEY = 'textbook-annotator:annotations:v1';
         const TOKEN_HIT_RATIO = 0.3;
