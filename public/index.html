@@ -1489,19 +1489,27 @@
               const path = this.unitPdfPath(unitId);
               this.setStatus(`正在加载 Unit ${unitId}：${path}`);
 
-              const loadingTask = pdfjsLib.getDocument({ url: path });
-              const pdfDoc = await loadingTask.promise;
+              try {
+                const loadingTask = pdfjsLib.getDocument({ url: path });
+                const pdfDoc = await loadingTask.promise;
 
-              this.setStatus(
-                `Unit ${unitId} 加载成功，共 ${pdfDoc.numPages} 页，正在渲染...`
-              );
+                this.setStatus(
+                  `Unit ${unitId} 加载成功，共 ${pdfDoc.numPages} 页，正在渲染...`
+                );
 
-              for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum += 1) {
-                await this.renderPage(pdfDoc, pageNum, container);
+                for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum += 1) {
+                  await this.renderPage(pdfDoc, pageNum, container);
+                }
+
+                this.repaintCurrentUnitHighlights();
+                this.setStatus(`Unit ${unitId} 渲染完成。当前标注 ${this.currentUnitCount} 条。`);
+                return true;
+              } catch (error) {
+                console.error(`Unit ${unitId} PDF 加载或渲染失败：`, error);
+                this.clearNode(container);
+                this.setStatus(`Unit ${unitId} PDF 加载失败，请检查文件路径或网络后重试。`);
+                return false;
               }
-
-              this.repaintCurrentUnitHighlights();
-              this.setStatus(`Unit ${unitId} 渲染完成。当前标注 ${this.currentUnitCount} 条。`);
             },
             async onUnitChange() {
               this.cancelAppend(true);
