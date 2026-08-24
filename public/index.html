@@ -1435,24 +1435,49 @@
                 mark.style.background = color;
                 highlightLayer.appendChild(mark);
               }
+
+              if (annotation && rects.length) {
+                const lastRect = rects[rects.length - 1];
+                const badge = document.createElement('span');
+                badge.textContent = String(this.getAnnotationCategoryIndex(annotation));
+                badge.style.position = 'absolute';
+                badge.style.left = `${lastRect.x + lastRect.width - 7}px`;
+                badge.style.top = `${lastRect.y + lastRect.height - 7}px`;
+                badge.style.width = '14px';
+                badge.style.height = '14px';
+                badge.style.borderRadius = '50%';
+                badge.style.background = this.getPenStrongColorById(annotation.pen);
+                badge.style.color = '#fff';
+                badge.style.fontSize = '10px';
+                badge.style.lineHeight = '14px';
+                badge.style.textAlign = 'center';
+                badge.style.fontWeight = '600';
+                badge.style.pointerEvents = 'none';
+                highlightLayer.appendChild(badge);
+              }
+            },
+            getAnnotationCategoryIndex(annotation) {
+              const entry = this.currentUnitSortedAnnotations.find(
+                (item) => item.row.id === annotation?.id
+              );
+              return entry?.categoryIndex || 1;
+            },
+            repaintPageHighlights(pageDiv, pdfPageNum) {
+              const layer = pageDiv.querySelector('.highlight-layer');
+              if (layer) this.clearNode(layer);
+
+              const rows = this.annotationsByUnit[String(this.currentUnit)] || [];
+              for (const row of rows) {
+                if (this.toPdfPageNum(this.currentUnit, row.pageNum) !== pdfPageNum) continue;
+                this.drawHighlightRects(pageDiv, row.rects || [], row);
+              }
             },
             repaintCurrentUnitHighlights() {
               const container = this.$refs.pdfContainer;
               const pages = container.querySelectorAll('.page-container');
               pages.forEach((pageDiv) => {
-                const layer = pageDiv.querySelector('.highlight-layer');
-                if (layer) this.clearNode(layer);
+                this.repaintPageHighlights(pageDiv, Number(pageDiv.dataset.pageNumber || '0'));
               });
-
-              const rows = this.annotationsByUnit[String(this.currentUnit)] || [];
-              for (const row of rows) {
-                const pdfPageNum = this.toPdfPageNum(this.currentUnit, row.pageNum);
-                const pageDiv = container.querySelector(
-                  `.page-container[data-page-number="${pdfPageNum}"]`
-                );
-                if (!pageDiv) continue;
-                this.drawHighlightRects(pageDiv, row.rects || [], row);
-              }
             },
             async renderPage(pdfDoc, pageNum, container) {
               const page = await pdfDoc.getPage(pageNum);
@@ -1483,6 +1508,8 @@
               const highlightLayer = document.createElement('div');
               highlightLayer.className = 'highlight-layer';
               pageDiv.appendChild(highlightLayer);
+              container.appendChild(pageDiv);
+              this.repaintPageHighlights(pageDiv, pageNum);
 
               const textLayerDiv = document.createElement('div');
               textLayerDiv.className = 'textLayer';
@@ -1509,7 +1536,6 @@
               );
 
               pageDiv.appendChild(textLayerDiv);
-              container.appendChild(pageDiv);
             },
             async renderPdfForUnit(unitId) {
               const container = this.$refs.pdfContainer;
