@@ -18,7 +18,13 @@ export async function onRequestGet(context) {
     return json({ ok: false, error: 'unit 参数无效（需为 1~8）。' }, { status: 400 });
   }
 
-  const raw = await env.ANNOTATION_KV.get(getUnitDataKey(unit));
+  let raw = null;
+  try {
+    raw = await env.ANNOTATION_KV.get(getUnitDataKey(unit));
+  } catch (error) {
+    console.error('读取 ANNOTATION_KV 失败：', error);
+    return json({ ok: false, error: '读取标注数据失败，请稍后重试。' }, { status: 500 });
+  }
   if (raw === null) {
     return json({
       ok: true,
@@ -71,14 +77,19 @@ export async function onRequestPost(context) {
   const annotations = normalizeAnnotations(body?.annotations);
   const summary = summarizeAnnotations(annotations);
   const now = Date.now();
-  await env.ANNOTATION_KV.put(
-    getUnitDataKey(unit),
-    JSON.stringify({
-      unit,
-      annotations,
-      updatedAt: now
-    })
-  );
+  try {
+    await env.ANNOTATION_KV.put(
+      getUnitDataKey(unit),
+      JSON.stringify({
+        unit,
+        annotations,
+        updatedAt: now
+      })
+    );
+  } catch (error) {
+    console.error('写入 ANNOTATION_KV 失败：', error);
+    return json({ ok: false, error: '保存标注数据失败，请稍后重试。' }, { status: 500 });
+  }
 
   return json({
     ok: true,
