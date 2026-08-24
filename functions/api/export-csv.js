@@ -19,7 +19,7 @@ export async function onRequestGet(context) {
 
   const raw = await env.ANNOTATION_KV.get(getUnitDataKey(unit));
   let payload = { annotations: [] };
-  if (raw) {
+  if (raw !== null) {
     try {
       payload = JSON.parse(raw);
     } catch {
@@ -34,7 +34,7 @@ export async function onRequestGet(context) {
   headers.set('content-disposition', `attachment; filename="unit${unit}.csv"`);
   headers.set('cache-control', 'no-store');
 
-  return new Response(csvText, {
+  return new Response(new TextEncoder().encode(csvText), {
     status: 200,
     headers
   });
