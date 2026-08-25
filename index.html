@@ -32,6 +32,16 @@
         -webkit-user-select: none;
       }
 
+      #pdfContainer {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1.5rem;
+        padding: 1.5rem 0;
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+
       textarea,
       select,
       button,
@@ -211,10 +221,9 @@
         </div>
       </header>
 
-      <main class="max-w-full max-w-[1400px] mx-auto px-3 py-3">
+      <main class="max-w-full mx-auto px-3 py-3 pr-[380px]">
         <div
-          class="flex flex-col gap-3 items-stretch max-w-full"
-          :class="isSidebarExpanded ? 'lg:flex-row' : 'lg:flex-col'"
+          class="max-w-full"
         >
           <section class="min-w-0 flex-1 max-w-full">
             <div ref="pdfContainer" aria-live="polite"></div>
@@ -222,9 +231,9 @@
 
           <aside
             v-if="isSidebarExpanded"
-            class="annotation-list w-full lg:w-96 lg:flex-shrink-0 bg-white border border-slate-200 rounded p-3 pt-6 flex flex-col min-h-0 overflow-hidden lg:sticky lg:top-[116px] lg:h-[calc(100vh-116px)]"
+            class="annotation-list fixed right-4 top-24 bottom-6 w-80 lg:w-[23rem] bg-white/95 backdrop-blur shadow-2xl rounded-2xl border border-gray-200 z-30 flex flex-col overflow-hidden"
           >
-            <div class="sticky top-0 z-10 bg-white flex items-center justify-between gap-2 mb-3 pb-2 shrink-0">
+            <div class="sticky top-0 z-10 bg-white/95 flex items-center justify-between gap-2 p-3 pb-2 shrink-0">
               <h2 class="text-sm font-semibold text-slate-800">本单元标注列表</h2>
               <select
                 class="border border-slate-300 rounded px-2 py-1 text-xs"
@@ -249,7 +258,7 @@
               暂无标注。点击上方分类按钮后，在课本文字上拖拽框选，标注会自动出现在这里。
             </div>
 
-            <div v-else class="space-y-3 flex-1 min-h-0 overflow-y-auto pr-1 pb-16">
+            <div v-else class="space-y-3 flex-1 overflow-y-auto p-3 pb-8">
               <article
                 v-for="entry in currentUnitDisplayAnnotations"
                 :key="entry.row.id"
@@ -1265,12 +1274,13 @@
               for (let i = pageRows.length - 1; i >= 0; i -= 1) {
                 const row = pageRows[i];
                 const rects = Array.isArray(row.rects) ? row.rects : [];
+                const rectScale = Number(pageDiv.dataset.pdfScale || SCALE) / SCALE;
                 for (const rect of rects) {
                   const inside =
-                    x >= rect.x &&
-                    x <= rect.x + rect.width &&
-                    y >= rect.y &&
-                    y <= rect.y + rect.height;
+                    x >= rect.x * rectScale &&
+                    x <= (rect.x + rect.width) * rectScale &&
+                    y >= rect.y * rectScale &&
+                    y <= (rect.y + rect.height) * rectScale;
                   if (inside) {
                     return row;
                   }
@@ -1551,14 +1561,15 @@
               if (!highlightLayer) return;
 
               const color = this.getPenColorById(annotation?.pen || PEN_PRESETS[0].id);
+              const rectScale = Number(pageDiv.dataset.pdfScale || SCALE) / SCALE;
 
               for (const rect of rects) {
                 const mark = document.createElement('div');
                 mark.className = 'highlight-rect';
-                mark.style.left = `${rect.x}px`;
-                mark.style.top = `${rect.y}px`;
-                mark.style.width = `${rect.width}px`;
-                mark.style.height = `${rect.height}px`;
+                mark.style.left = `${rect.x * rectScale}px`;
+                mark.style.top = `${rect.y * rectScale}px`;
+                mark.style.width = `${rect.width * rectScale}px`;
+                mark.style.height = `${rect.height * rectScale}px`;
                 mark.style.background = color;
                 highlightLayer.appendChild(mark);
               }
@@ -1568,8 +1579,8 @@
                 const badge = document.createElement('span');
                 badge.textContent = String(this.getAnnotationCategoryIndex(annotation));
                 badge.style.position = 'absolute';
-                badge.style.left = `${lastRect.x + lastRect.width - 7}px`;
-                badge.style.top = `${lastRect.y + lastRect.height - 7}px`;
+                badge.style.left = `${(lastRect.x + lastRect.width) * rectScale - 7}px`;
+                badge.style.top = `${(lastRect.y + lastRect.height) * rectScale - 7}px`;
                 badge.style.width = '14px';
                 badge.style.height = '14px';
                 badge.style.borderRadius = '50%';
@@ -1610,12 +1621,16 @@
               if (loadToken !== this.currentLoadToken) return false;
               const page = await pdfDoc.getPage(pageNum);
               if (loadToken !== this.currentLoadToken) return false;
-              const viewport = page.getViewport({ scale: SCALE });
+              const baseViewport = page.getViewport({ scale: 1 });
+              const availableWidth = Math.max(320, container.clientWidth || baseViewport.width * SCALE);
+              const scale = Math.min(SCALE, availableWidth / baseViewport.width);
+              const viewport = page.getViewport({ scale });
               const pixelRatio = window.devicePixelRatio || 1;
 
               const pageDiv = document.createElement('div');
               pageDiv.className = 'page-container';
               pageDiv.dataset.pageNumber = String(pageNum);
+              pageDiv.dataset.pdfScale = String(scale);
               pageDiv.style.width = `${viewport.width}px`;
               pageDiv.style.height = `${viewport.height}px`;
 
