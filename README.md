@@ -2,15 +2,15 @@
 
 本项目采用 **零打包前端** 架构：
 
-- 前端主逻辑仅 `public/index.html`
-- Cloudflare Pages Functions 位于项目根目录 `functions/`，与静态输出目录 `public/` 同级
+- 前端主逻辑仅根目录 `index.html`
+- Cloudflare Pages Functions 位于项目根目录 `functions/`，与静态页面和资源同级
 - 通过 CDN 引入 Vue 3 / TailwindCSS / PDF.js
 - 标注数据唯一保存在 Cloudflare KV
 - CSV 工作流采用**按单元自动加载/保存**
 
 ## 当前数据与标注流程
 
-- PDF：`public/pdfs/unit1.pdf` ~ `public/pdfs/unit8.pdf`
+- PDF：`pdfs/unit1.pdf` ~ `pdfs/unit8.pdf`
 - 标注数据存储在 Cloudflare KV。
 - KV 是唯一数据来源；云端不可用时页面直接提示同步失败。
 - 自动加载仅从 KV 读取；KV 为空时页面显示 0 条，保存后写入 KV。
@@ -38,7 +38,6 @@
 ## 本地运行
 
 ```bash
-cd public
 python -m http.server 8788
 ```
 
@@ -69,8 +68,8 @@ git push -u origin main
 3. 构建配置：
    - Framework preset: `None`
    - Build command: 留空
-   - Build output directory: `public`
-  - 不要将 `functions/` 填入输出目录或移动到 `public/` 内
+  - Build output directory: `.`
+  - `index.html`、静态资源和 `functions/` 均位于仓库根目录
 4. 点击 Deploy
 
 后续每次 push 到 `main` 会自动重新部署。
@@ -80,7 +79,7 @@ git push -u origin main
 ```bash
 npm install
 npx wrangler login
-npx wrangler pages deploy public --project-name <你的 pages 项目名>
+npx wrangler pages deploy . --project-name <你的 pages 项目名>
 ```
 
 ---
