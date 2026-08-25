@@ -18,6 +18,26 @@
     <style>
       body {
         background: #f3f4f6;
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+
+      #app {
+              textLayerDiv.addEventListener('touchstart', (event) => this.onDragStart(event, pageDiv), {
+                passive: false
+              });
+        max-width: 100%;
+        overflow-x: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      textarea,
+      select,
+      button,
+      input {
+        user-select: text;
+        -webkit-user-select: text;
       }
 
       .page-container {
@@ -80,6 +100,8 @@
 
       .pen-mode .textLayer {
         user-select: none !important;
+        -webkit-user-select: none !important;
+        touch-action: none;
         cursor: crosshair !important;
       }
 
@@ -92,7 +114,7 @@
   </head>
 
   <body>
-    <div id="app" :class="['min-h-screen', penEnabled ? 'pen-mode' : '']">
+    <div id="app" class="max-w-full overflow-x-hidden" :class="['min-h-screen', penEnabled ? 'pen-mode' : '']">
       <header
         class="sticky top-0 z-50 bg-white border-b border-slate-200 px-4 py-3"
       >
@@ -189,18 +211,18 @@
         </div>
       </header>
 
-      <main class="max-w-[1400px] mx-auto px-3 py-3">
+      <main class="max-w-full max-w-[1400px] mx-auto px-3 py-3">
         <div
-          class="grid grid-cols-1 gap-3 items-start"
-          :class="isSidebarExpanded ? 'lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]' : 'lg:grid-cols-1'"
+          class="flex flex-col gap-3 items-stretch max-w-full"
+          :class="isSidebarExpanded ? 'lg:flex-row' : 'lg:flex-col'"
         >
-          <section class="min-w-0">
+          <section class="min-w-0 flex-1 max-w-full">
             <div ref="pdfContainer" aria-live="polite"></div>
           </section>
 
           <aside
             v-if="isSidebarExpanded"
-            class="annotation-list bg-white border border-slate-200 rounded p-3 pt-6 flex flex-col min-h-0 overflow-hidden lg:sticky lg:top-[116px] lg:h-[calc(100vh-116px)]"
+            class="annotation-list w-full lg:w-96 lg:flex-shrink-0 bg-white border border-slate-200 rounded p-3 pt-6 flex flex-col min-h-0 overflow-hidden lg:sticky lg:top-[116px] lg:h-[calc(100vh-116px)]"
           >
             <div class="sticky top-0 z-10 bg-white flex items-center justify-between gap-2 mb-3 pb-2 shrink-0">
               <h2 class="text-sm font-semibold text-slate-800">本单元标注列表</h2>
@@ -1273,8 +1295,9 @@
             },
             getRelativePoint(event, pageDiv) {
               const box = pageDiv.getBoundingClientRect();
-              const rawX = event.clientX - box.left;
-              const rawY = event.clientY - box.top;
+              const point = event.touches?.[0] || event.changedTouches?.[0] || event;
+              const rawX = point.clientX - box.left;
+              const rawY = point.clientY - box.top;
               return {
                 x: Math.max(0, Math.min(rawX, box.width)),
                 y: Math.max(0, Math.min(rawY, box.height))
@@ -1324,6 +1347,12 @@
               }
               if (state?.upHandler) {
                 document.removeEventListener('mouseup', state.upHandler);
+              }
+              if (state?.touchMoveHandler) {
+                document.removeEventListener('touchmove', state.touchMoveHandler);
+              }
+              if (state?.touchEndHandler) {
+                document.removeEventListener('touchend', state.touchEndHandler);
               }
               if (state?.dragBoxEl?.parentNode) {
                 state.dragBoxEl.parentNode.removeChild(state.dragBoxEl);
@@ -1404,7 +1433,8 @@
               }));
             },
             onDragStart(event, pageDiv) {
-              if (!this.penEnabled || event.button !== 0) return;
+              const isTouch = event.type.startsWith('touch');
+              if (!this.penEnabled || (!isTouch && event.button !== 0)) return;
 
               event.preventDefault();
               window.getSelection()?.removeAllRanges();
@@ -1431,13 +1461,18 @@
                 this.clearDragState();
               };
 
+              const touchMoveHandler = isTouch ? moveHandler : null;
+              const touchEndHandler = isTouch ? upHandler : null;
+
               this.dragState = {
                 pageDiv,
                 start,
                 current: start,
                 dragBoxEl,
                 moveHandler,
-                upHandler
+                upHandler,
+                touchMoveHandler,
+                touchEndHandler
               };
               this.updateDragBox(dragBoxEl, {
                 left: start.x,
@@ -1448,6 +1483,10 @@
 
               document.addEventListener('mousemove', moveHandler);
               document.addEventListener('mouseup', upHandler);
+              if (isTouch) {
+                document.addEventListener('touchmove', touchMoveHandler, { passive: false });
+                document.addEventListener('touchend', touchEndHandler, { passive: false });
+              }
             },
             finishDragSelect(pageDiv, finalRect) {
               if (finalRect.width < 3 || finalRect.height < 3) return;
