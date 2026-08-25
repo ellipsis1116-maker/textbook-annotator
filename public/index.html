@@ -301,7 +301,6 @@
         const STORAGE_KEY = 'textbook-annotator:annotations:v1';
         const TOKEN_HIT_RATIO = 0.3;
         const AUTO_SAVE_INTERVAL_MS = 3 * 60 * 1000;
-        const API_BASE = '/api';
         const UNIT_CSV_COLUMNS = ['id', 'pen', 'pageNum', 'text', 'sourceText', 'zh', 'createdAt', 'rects'];
         const CLEAN_CSV_COLUMNS = ['类型', '序号', '英文', '中文'];
         const UNIT_PDF_PATHS = {
@@ -450,9 +449,6 @@
             createEmptyUnitMap() {
               return Object.fromEntries(Array.from({ length: 8 }, (_, i) => [String(i + 1), []]));
             },
-            getApiUrl(path) {
-              return `${API_BASE}${path}`;
-            },
             setStatus(message) {
               this.status = message;
             },
@@ -597,7 +593,7 @@
               }
 
               const annotations = this.annotationsByUnit[String(unitNum)] || [];
-              const response = await fetch(this.getApiUrl('/annotations'), {
+              const response = await fetch(`/api/annotations?unit=${encodeURIComponent(String(unitNum))}`, {
                 method: 'POST',
                 headers: {
                   'content-type': 'application/json'
@@ -635,7 +631,7 @@
               }
 
               const response = await fetch(
-                `${this.getApiUrl('/annotations')}?unit=${encodeURIComponent(String(unitNum))}`,
+                `/api/annotations?unit=${encodeURIComponent(String(unitNum))}`,
                 {
                   method: 'GET',
                   cache: 'no-store'
@@ -916,7 +912,7 @@
               const unitNum = Number(unitId);
               if (!Number.isFinite(unitNum) || unitNum <= 0) return;
               const link = document.createElement('a');
-              link.href = `${this.getApiUrl('/export-csv')}?unit=${encodeURIComponent(String(unitNum))}`;
+              link.href = `/api/export-csv?unit=${encodeURIComponent(String(unitNum))}`;
               link.target = '_blank';
               link.rel = 'noopener';
               document.body.appendChild(link);
