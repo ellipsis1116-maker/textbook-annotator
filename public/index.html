@@ -145,6 +145,14 @@
           </button>
         </div>
 
+        <span
+          class="text-xs text-slate-600 min-w-[180px] max-w-[360px] truncate"
+          role="status"
+          aria-live="polite"
+        >
+          {{ status }}
+        </span>
+
         <button
           type="button"
           class="text-sm rounded px-3 py-1 border border-slate-300 bg-white text-slate-700"
@@ -176,8 +184,6 @@
       </header>
 
       <main class="max-w-[1400px] mx-auto px-3 py-3">
-        <div class="text-xs text-slate-600 mb-2">{{ status }}</div>
-
         <div
           class="grid grid-cols-1 gap-3 items-start"
           :class="isSidebarExpanded ? 'lg:grid-cols-[1fr_310px]' : 'lg:grid-cols-1'"

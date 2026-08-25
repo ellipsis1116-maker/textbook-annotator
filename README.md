@@ -3,6 +3,7 @@
 本项目采用 **零打包前端** 架构：
 
 - 前端主逻辑仅 `public/index.html`
+- Cloudflare Pages Functions 位于项目根目录 `functions/`，与静态输出目录 `public/` 同级
 - 通过 CDN 引入 Vue 3 / TailwindCSS / PDF.js
 - 标注主缓存保存在 `localStorage`
 - CSV 工作流采用**按单元自动加载/保存**
@@ -70,6 +71,7 @@ git push -u origin main
    - Framework preset: `None`
    - Build command: 留空
    - Build output directory: `public`
+  - 不要将 `functions/` 填入输出目录或移动到 `public/` 内
 4. 点击 Deploy
 
 后续每次 push 到 `main` 会自动重新部署。
