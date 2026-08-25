@@ -105,6 +105,7 @@
           id="unitSelect"
           class="border border-slate-300 rounded px-2 py-1 text-sm"
           v-model.number="currentUnit"
+          :disabled="isUnitLoading"
           @change="onUnitChange"
         >
           <option v-for="u in units" :key="u" :value="u">Unit {{ u }}</option>
@@ -379,7 +380,9 @@
               autoSaveTimerId: null,
               pdfLoadingTask: null,
               pdfDocument: null,
-              pdfRenderGeneration: 0,
+              currentLoadToken: 0,
+              isUnitLoading: false,
+              activeRenderTasks: new Set(),
               hasUnsavedCsvChanges: false,
               autoSaveHintShown: false,
               isSidebarExpanded: true
@@ -510,7 +513,10 @@
               return UNIT_PDF_PATHS[Number(unitId)] || UNIT_PDF_PATHS[1];
             },
             async destroyCurrentPdf() {
-              this.pdfRenderGeneration += 1;
+              for (const renderTask of this.activeRenderTasks) {
+                renderTask.cancel?.();
+              }
+              this.activeRenderTasks.clear();
               const loadingTask = this.pdfLoadingTask;
               const pdfDocument = this.pdfDocument;
               this.pdfLoadingTask = null;
@@ -604,7 +610,7 @@
                 updatedAt: payload?.updatedAt || null
               };
             },
-            async loadUnitCsvFromCloud(unitId = this.currentUnit) {
+            async loadUnitCsvFromCloud(unitId = this.currentUnit, loadToken = this.currentLoadToken) {
               const unitNum = Number(unitId);
               if (!Number.isFinite(unitNum) || unitNum <= 0) {
                 return { ok: false, message: 'unit 参数无效。' };
@@ -625,6 +631,8 @@
                 payload = null;
               }
 
+              if (loadToken !== this.currentLoadToken) return { ok: false, stale: true };
+
               if (!response.ok || !payload?.ok) {
                 return {
                   ok: false,
@@ -639,7 +647,9 @@
               this.saveLocalAnnotations();
               this.hasUnsavedCsvChanges = false;
               this.repaintCurrentUnitHighlights();
-              this.$nextTick(() => this.syncAllAnnotationTextareaHeights());
+              this.$nextTick(() => {
+                if (loadToken === this.currentLoadToken) this.syncAllAnnotationTextareaHeights();
+              });
 
               return {
                 ok: true,
@@ -1142,11 +1152,12 @@
               return { ok: true, imported: nextRows.length };
             },
 
-            async tryLoadCurrentUnitCsvIfPresent() {
-              const cloudResult = await this.loadUnitCsvFromCloud(this.currentUnit);
+            async tryLoadCurrentUnitCsvIfPresent(loadToken = this.currentLoadToken) {
+              const cloudResult = await this.loadUnitCsvFromCloud(this.currentUnit, loadToken);
+              if (loadToken !== this.currentLoadToken || cloudResult.stale) return false;
               if (cloudResult.ok && cloudResult.exists) {
                 this.setStatus(`已自动载入云端 Unit ${this.currentUnit}（${cloudResult.imported} 条）。`);
-                return;
+                return true;
               }
 
               const unitNum = Number(this.currentUnit);
@@ -1159,11 +1170,14 @@
               for (const path of candidates) {
                 try {
                   const response = await fetch(path, { cache: 'no-store' });
+                  if (loadToken !== this.currentLoadToken) return false;
                   if (!response.ok) continue;
-                  const result = this.importCurrentUnitFromCsvText(await response.text(), path);
+                  const csvText = await response.text();
+                  if (loadToken !== this.currentLoadToken) return false;
+                  const result = this.importCurrentUnitFromCsvText(csvText, path);
                   if (result.ok) {
                     this.setStatus(`已载入本地初始数据 Unit ${unitNum}（${result.imported} 条）。`);
-                    return;
+                    return true;
                   }
                 } catch (error) {
                   console.warn(`读取本地初始文件失败：${path}`, error);
@@ -1173,6 +1187,7 @@
               this.setStatus(
                 cloudResult.message || `Unit ${this.currentUnit} 暂无云端或本地初始数据。`
               );
+              return false;
             },
             deleteAnnotation(annotationId) {
               const unitKey = String(this.currentUnit);
@@ -1523,8 +1538,10 @@
                 this.repaintPageHighlights(pageDiv, Number(pageDiv.dataset.pageNumber || '0'));
               });
             },
-            async renderPage(pdfDoc, pageNum, container) {
+            async renderPage(pdfDoc, pageNum, container, loadToken) {
+              if (loadToken !== this.currentLoadToken) return false;
               const page = await pdfDoc.getPage(pageNum);
+              if (loadToken !== this.currentLoadToken) return false;
               const viewport = page.getViewport({ scale: SCALE });
               const pixelRatio = window.devicePixelRatio || 1;
 
@@ -1546,7 +1563,14 @@
                 transform: pixelRatio !== 1 ? [pixelRatio, 0, 0, pixelRatio, 0, 0] : null,
                 viewport
               };
-              await page.render(renderContext).promise;
+              const renderTask = page.render(renderContext);
+              this.activeRenderTasks.add(renderTask);
+              try {
+                await renderTask.promise;
+              } finally {
+                this.activeRenderTasks.delete(renderTask);
+              }
+              if (loadToken !== this.currentLoadToken) return false;
               pageDiv.appendChild(canvas);
 
               const highlightLayer = document.createElement('div');
@@ -1561,6 +1585,7 @@
               textLayerDiv.style.height = `${viewport.height}px`;
 
               const textContent = await page.getTextContent();
+              if (loadToken !== this.currentLoadToken) return false;
               pageDiv.__tokens = this.extractPageTokensFromTextContent(textContent, viewport);
               const task = pdfjsLib.renderTextLayer({
                 textContentSource: textContent,
@@ -1573,6 +1598,7 @@
               } else {
                 await task;
               }
+              if (loadToken !== this.currentLoadToken) return false;
 
               textLayerDiv.addEventListener('mousedown', (event) => this.onDragStart(event, pageDiv));
               textLayerDiv.addEventListener('dblclick', (event) =>
@@ -1580,11 +1606,12 @@
               );
 
               pageDiv.appendChild(textLayerDiv);
+              return true;
             },
-            async renderPdfForUnit(unitId) {
+            async renderPdfForUnit(unitId, loadToken = this.currentLoadToken) {
               const container = this.$refs.pdfContainer;
               await this.destroyCurrentPdf();
-              const renderGeneration = this.pdfRenderGeneration;
+              if (loadToken !== this.currentLoadToken) return false;
 
               const path = this.unitPdfPath(unitId);
               this.setStatus(`正在加载 Unit ${unitId}：${path}`);
@@ -1595,22 +1622,24 @@
                 const pdfDoc = await loadingTask.promise;
                 this.pdfDocument = pdfDoc;
                 this.pdfLoadingTask = null;
-                if (renderGeneration !== this.pdfRenderGeneration) return false;
+                if (loadToken !== this.currentLoadToken) return false;
 
                 this.setStatus(
                   `Unit ${unitId} 加载成功，共 ${pdfDoc.numPages} 页，正在渲染...`
                 );
 
                 for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum += 1) {
-                  if (renderGeneration !== this.pdfRenderGeneration) return false;
-                  await this.renderPage(pdfDoc, pageNum, container);
+                  if (loadToken !== this.currentLoadToken) return false;
+                  const rendered = await this.renderPage(pdfDoc, pageNum, container, loadToken);
+                  if (!rendered) return false;
                 }
 
+                if (loadToken !== this.currentLoadToken) return false;
                 this.repaintCurrentUnitHighlights();
                 this.setStatus(`Unit ${unitId} 渲染完成。当前标注 ${this.currentUnitCount} 条。`);
                 return true;
               } catch (error) {
-                if (renderGeneration !== this.pdfRenderGeneration) return false;
+                if (loadToken !== this.currentLoadToken) return false;
                 console.error(`Unit ${unitId} PDF 加载或渲染失败：`, error);
                 this.pdfLoadingTask = null;
                 this.pdfDocument = null;
@@ -1620,11 +1649,23 @@
               }
             },
             async onUnitChange() {
+              const loadToken = this.currentLoadToken + 1;
+              this.currentLoadToken = loadToken;
+              this.isUnitLoading = true;
               this.cancelAppend(true);
-              await this.destroyCurrentPdf();
-              await this.renderPdfForUnit(this.currentUnit);
-              await this.tryLoadCurrentUnitCsvIfPresent();
-              this.$nextTick(() => this.syncAllAnnotationTextareaHeights());
+              try {
+                await this.destroyCurrentPdf();
+                if (loadToken !== this.currentLoadToken) return;
+                await this.renderPdfForUnit(this.currentUnit, loadToken);
+                if (loadToken !== this.currentLoadToken) return;
+                await this.tryLoadCurrentUnitCsvIfPresent(loadToken);
+                if (loadToken !== this.currentLoadToken) return;
+                this.$nextTick(() => {
+                  if (loadToken === this.currentLoadToken) this.syncAllAnnotationTextareaHeights();
+                });
+              } finally {
+                if (loadToken === this.currentLoadToken) this.isUnitLoading = false;
+              }
             },
             clearCurrentUnit() {
               const key = String(this.currentUnit);
@@ -1662,12 +1703,17 @@
             window.addEventListener('keydown', this.onEsc);
             this.startAutoSaveTimer();
 
+            const loadToken = this.currentLoadToken;
+            this.isUnitLoading = true;
             try {
-              await this.renderPdfForUnit(this.currentUnit);
-              await this.tryLoadCurrentUnitCsvIfPresent();
+              await this.renderPdfForUnit(this.currentUnit, loadToken);
+              if (loadToken !== this.currentLoadToken) return;
+              await this.tryLoadCurrentUnitCsvIfPresent(loadToken);
             } catch (error) {
               this.setStatus(`加载失败：${String(error?.message || error)}`);
               console.error(error);
+            } finally {
+              if (loadToken === this.currentLoadToken) this.isUnitLoading = false;
             }
           },
           beforeUnmount() {
