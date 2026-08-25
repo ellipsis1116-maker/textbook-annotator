@@ -124,9 +124,9 @@
   </head>
 
   <body>
-    <div id="app" class="max-w-full overflow-x-hidden" :class="['min-h-screen', penEnabled ? 'pen-mode' : '']">
+    <div id="app" class="h-screen w-screen overflow-hidden flex flex-col bg-gray-100" :class="penEnabled ? 'pen-mode' : ''">
       <header
-        class="sticky top-0 z-50 bg-white border-b border-slate-200 px-4 py-3"
+        class="flex-shrink-0 z-40 bg-white border-b border-gray-200 shadow-sm relative px-4 py-3"
       >
         <div class="flex items-center gap-3 min-w-0 mb-2">
           <h1 class="text-sm sm:text-base font-semibold text-slate-800 shrink-0">
@@ -221,17 +221,14 @@
         </div>
       </header>
 
-      <main class="max-w-full mx-auto px-3 py-3 pr-[380px]">
-        <div
-          class="max-w-full"
-        >
-          <section class="min-w-0 flex-1 max-w-full">
+      <main class="flex-1 w-full overflow-hidden relative flex">
+          <section class="flex-1 h-full overflow-y-auto overflow-x-hidden pr-[380px] p-6 min-w-0">
             <div ref="pdfContainer" aria-live="polite"></div>
           </section>
 
           <aside
             v-if="isSidebarExpanded"
-            class="annotation-list fixed right-4 top-24 bottom-6 w-80 lg:w-[23rem] bg-white/95 backdrop-blur shadow-2xl rounded-2xl border border-gray-200 z-30 flex flex-col overflow-hidden"
+            class="annotation-list fixed right-4 top-20 bottom-4 w-80 lg:w-[23rem] bg-white/95 backdrop-blur shadow-2xl rounded-2xl border border-gray-200 z-30 flex flex-col overflow-hidden"
           >
             <div class="sticky top-0 z-10 bg-white/95 flex items-center justify-between gap-2 p-3 pb-2 shrink-0">
               <h2 class="text-sm font-semibold text-slate-800">本单元标注列表</h2>
@@ -344,7 +341,6 @@
               </article>
             </div>
           </aside>
-        </div>
       </main>
     </div>
 
