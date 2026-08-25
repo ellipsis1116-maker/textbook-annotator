@@ -200,9 +200,9 @@
 
           <aside
             v-if="isSidebarExpanded"
-            class="annotation-list bg-white border border-slate-200 rounded p-3 pt-6 lg:sticky lg:top-[116px]"
+            class="annotation-list bg-white border border-slate-200 rounded p-3 pt-6 flex flex-col min-h-0 overflow-hidden lg:sticky lg:top-[116px] lg:h-[calc(100vh-116px)]"
           >
-            <div class="flex items-center justify-between mb-3">
+            <div class="sticky top-0 z-10 bg-white flex items-center justify-between gap-2 mb-3 pb-2 shrink-0">
               <h2 class="text-sm font-semibold text-slate-800">本单元标注列表</h2>
               <select
                 class="border border-slate-300 rounded px-2 py-1 text-xs"
@@ -227,7 +227,7 @@
               暂无标注。点击上方分类按钮后，在课本文字上拖拽框选，标注会自动出现在这里。
             </div>
 
-            <div v-else class="space-y-3 max-h-[72vh] overflow-auto pr-1">
+            <div v-else class="space-y-3 flex-1 min-h-0 overflow-y-auto pr-1 pb-16">
               <article
                 v-for="entry in currentUnitDisplayAnnotations"
                 :key="entry.row.id"
