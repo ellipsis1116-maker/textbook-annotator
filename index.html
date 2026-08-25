@@ -255,7 +255,10 @@
               </button>
             </div>
 
-            <div v-if="!currentUnitDisplayAnnotations.length" class="text-xs text-slate-500 leading-6">
+            <div
+              v-if="!currentUnitDisplayAnnotations.length"
+              class="py-12 px-6 text-center text-gray-400 text-sm leading-relaxed flex flex-col items-center justify-center"
+            >
               暂无标注。点击上方分类按钮后，在课本文字上拖拽框选，标注会自动出现在这里。
             </div>
 
@@ -723,7 +726,7 @@
             getPenBadgeLabelById(penId) {
               switch (this.normalizePenId(penId)) {
                 case 'core_word':
-                  return '核心词';
+                  return '核心单词';
                 case 'ext_word':
                   return '*拓展单词';
                 case 'core_phrase':
@@ -735,7 +738,7 @@
                 case 'ext_sentence':
                   return '*拓展句';
                 default:
-                  return '核心词';
+                  return '核心单词';
               }
             },
             setActivePen(penId) {
