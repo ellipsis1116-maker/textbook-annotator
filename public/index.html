@@ -373,6 +373,9 @@
         const PEN_PANEL_ORDER_MAP = Object.fromEntries(
           PEN_PANEL_ORDER.map((penId, index) => [penId, index])
         );
+        let currentPdfLoadingTask = null;
+        let currentPdfDocument = null;
+        const activePdfRenderTasks = new Set();
 
         createApp({
           data() {
@@ -388,11 +391,8 @@
               annotationTextareaRefs: {},
               appendTargetId: null,
               autoSaveTimerId: null,
-              pdfLoadingTask: null,
-              pdfDocument: null,
               currentLoadToken: 0,
               isUnitLoading: false,
-              activeRenderTasks: new Set(),
               hasUnsavedCsvChanges: false,
               autoSaveHintShown: false,
               isSidebarExpanded: true
@@ -523,20 +523,28 @@
               return UNIT_PDF_PATHS[Number(unitId)] || UNIT_PDF_PATHS[1];
             },
             async destroyCurrentPdf() {
-              for (const renderTask of this.activeRenderTasks) {
+              for (const renderTask of activePdfRenderTasks) {
                 renderTask.cancel?.();
               }
-              this.activeRenderTasks.clear();
-              const loadingTask = this.pdfLoadingTask;
-              const pdfDocument = this.pdfDocument;
-              this.pdfLoadingTask = null;
-              this.pdfDocument = null;
+              activePdfRenderTasks.clear();
+              const loadingTask = currentPdfLoadingTask;
+              const pdfDocument = currentPdfDocument;
+              currentPdfLoadingTask = null;
+              currentPdfDocument = null;
 
               if (loadingTask?.destroy) {
-                await loadingTask.destroy();
+                try {
+                  await loadingTask.destroy();
+                } catch (error) {
+                  console.warn('销毁 PDF 加载任务失败，继续切换单元：', error);
+                }
               }
               if (pdfDocument?.destroy) {
-                await pdfDocument.destroy();
+                try {
+                  await pdfDocument.destroy();
+                } catch (error) {
+                  console.warn('销毁 PDF 实例失败，继续加载新单元：', error);
+                }
               }
 
               this.clearNode(this.$refs.pdfContainer);
@@ -1537,11 +1545,11 @@
                 viewport
               };
               const renderTask = page.render(renderContext);
-              this.activeRenderTasks.add(renderTask);
+              activePdfRenderTasks.add(renderTask);
               try {
                 await renderTask.promise;
               } finally {
-                this.activeRenderTasks.delete(renderTask);
+                activePdfRenderTasks.delete(renderTask);
               }
               if (loadToken !== this.currentLoadToken) return false;
               pageDiv.appendChild(canvas);
@@ -1591,10 +1599,10 @@
 
               try {
                 const loadingTask = pdfjsLib.getDocument({ url: path });
-                this.pdfLoadingTask = loadingTask;
+                currentPdfLoadingTask = loadingTask;
                 const pdfDoc = await loadingTask.promise;
-                this.pdfDocument = pdfDoc;
-                this.pdfLoadingTask = null;
+                currentPdfDocument = pdfDoc;
+                currentPdfLoadingTask = null;
                 if (loadToken !== this.currentLoadToken) return false;
 
                 this.setStatus(
@@ -1614,8 +1622,8 @@
               } catch (error) {
                 if (loadToken !== this.currentLoadToken) return false;
                 console.error(`Unit ${unitId} PDF 加载或渲染失败：`, error);
-                this.pdfLoadingTask = null;
-                this.pdfDocument = null;
+                currentPdfLoadingTask = null;
+                currentPdfDocument = null;
                 this.clearNode(container);
                 this.setStatus(`Unit ${unitId} PDF 加载失败，请检查文件路径或网络后重试。`);
                 return false;
