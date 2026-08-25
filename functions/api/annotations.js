@@ -1,101 +1,89 @@
 import {
   getUnitDataKey,
-  getUnitFromRequest,
   isValidUnit,
-  json,
   normalizeAnnotations,
-  requireKv,
   summarizeAnnotations
 } from '../_lib/common.js';
 
-export async function onRequestGet(context) {
+export async function onRequest(context) {
   const { request, env } = context;
-  const kvError = requireKv(env);
-  if (kvError) return kvError;
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type'
+  };
 
-  const unit = getUnitFromRequest(request);
-  if (!unit) {
-    return json({ ok: false, error: 'unit 参数无效（需为 1~8）。' }, { status: 400 });
-  }
-
-  let raw = null;
-  try {
-    raw = await env.ANNOTATION_KV.get(getUnitDataKey(unit));
-  } catch (error) {
-    console.error('读取 ANNOTATION_KV 失败：', error);
-    return json({ ok: false, error: '读取标注数据失败，请稍后重试。' }, { status: 500 });
-  }
-  if (raw === null) {
-    return json({
-      ok: true,
-      unit,
-      exists: false,
-      annotations: [],
-      total: 0,
-      byPen: {},
-      updatedAt: null
+  if (request.method === 'OPTIONS') return new Response(null, { headers });
+  if (!env?.ANNOTATION_KV) {
+    return new Response(JSON.stringify({ ok: false, error: 'KV binding ANNOTATION_KV 不存在。' }), {
+      status: 500,
+      headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' }
     });
   }
 
-  let payload = null;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    payload = null;
-  }
-
-  const annotations = normalizeAnnotations(payload?.annotations);
-  const summary = summarizeAnnotations(annotations);
-  return json({
-    ok: true,
-    unit,
-    exists: true,
-    annotations,
-    total: summary.total,
-    byPen: summary.byPen,
-    updatedAt: Number.isFinite(Number(payload?.updatedAt)) ? Number(payload.updatedAt) : null
-  });
-}
-
-export async function onRequestPost(context) {
-  const { request, env } = context;
-  const kvError = requireKv(env);
-  if (kvError) return kvError;
-
-  let body = null;
-  try {
-    body = await request.json();
-  } catch {
-    return json({ ok: false, error: '请求体必须为 JSON。' }, { status: 400 });
-  }
-
-  const unit = Number(body?.unit);
+  const url = new URL(request.url);
+  const unit = Number(url.searchParams.get('unit') || '1');
   if (!isValidUnit(unit)) {
-    return json({ ok: false, error: 'unit 参数无效（需为 1~8）。' }, { status: 400 });
+    return new Response(JSON.stringify({ ok: false, error: 'unit 参数无效（需为 1~8）。' }), {
+      status: 400,
+      headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' }
+    });
   }
+  const responseHeaders = { ...headers, 'Content-Type': 'application/json; charset=utf-8' };
 
-  const annotations = normalizeAnnotations(body?.annotations);
-  const summary = summarizeAnnotations(annotations);
-  const now = Date.now();
-  try {
-    await env.ANNOTATION_KV.put(
-      getUnitDataKey(unit),
-      JSON.stringify({
+  if (request.method === 'GET') {
+    try {
+      const raw = await env.ANNOTATION_KV.get(getUnitDataKey(unit));
+      let payload = null;
+      if (raw) {
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          payload = null;
+        }
+      }
+      const annotations = normalizeAnnotations(payload?.annotations);
+      const summary = summarizeAnnotations(annotations);
+      return new Response(JSON.stringify({
+        ok: true,
         unit,
+        exists: raw !== null && raw !== '',
         annotations,
-        updatedAt: now
-      })
-    );
-  } catch (error) {
-    console.error('写入 ANNOTATION_KV 失败：', error);
-    return json({ ok: false, error: '保存标注数据失败，请稍后重试。' }, { status: 500 });
+        total: summary.total,
+        byPen: summary.byPen,
+        updatedAt: Number.isFinite(Number(payload?.updatedAt)) ? Number(payload.updatedAt) : null
+      }), { status: 200, headers: responseHeaders });
+    } catch (error) {
+      console.error('读取 ANNOTATION_KV 失败：', error);
+      return new Response(JSON.stringify({ ok: false, error: '读取标注数据失败，请稍后重试。' }), {
+        status: 500,
+        headers: responseHeaders
+      });
+    }
   }
 
-  return json({
-    ok: true,
-    unit,
-    total: summary.total,
-    byPen: summary.byPen,
-    updatedAt: now
+  if (request.method === 'POST') {
+    try {
+      const body = await request.json();
+      const annotations = normalizeAnnotations(body?.annotations);
+      const now = Date.now();
+      await env.ANNOTATION_KV.put(getUnitDataKey(unit), JSON.stringify({ unit, annotations, updatedAt: now }));
+      const summary = summarizeAnnotations(annotations);
+      return new Response(JSON.stringify({ ok: true, unit, total: summary.total, byPen: summary.byPen, updatedAt: now }), {
+        status: 200,
+        headers: responseHeaders
+      });
+    } catch (error) {
+      console.error('写入 ANNOTATION_KV 失败：', error);
+      return new Response(JSON.stringify({ ok: false, error: '保存标注数据失败，请稍后重试。' }), {
+        status: 500,
+        headers: responseHeaders
+      });
+    }
+  }
+
+  return new Response(JSON.stringify({ ok: false, error: 'Method Not Allowed' }), {
+    status: 405,
+    headers: responseHeaders
   });
 }

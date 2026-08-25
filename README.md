@@ -5,14 +5,14 @@
 - 前端主逻辑仅 `public/index.html`
 - Cloudflare Pages Functions 位于项目根目录 `functions/`，与静态输出目录 `public/` 同级
 - 通过 CDN 引入 Vue 3 / TailwindCSS / PDF.js
-- 标注主缓存保存在 `localStorage`
+- 标注数据唯一保存在 Cloudflare KV
 - CSV 工作流采用**按单元自动加载/保存**
 
 ## 当前数据与标注流程
 
 - PDF：`public/pdfs/unit1.pdf` ~ `public/pdfs/unit8.pdf`
 - 标注数据存储在 Cloudflare KV。
-- 本地 `localStorage` 作为兜底缓存。
+- KV 是唯一数据来源；云端不可用时页面直接提示同步失败。
 - 自动加载仅从 KV 读取；KV 为空时页面显示 0 条，保存后写入 KV。
 - 云端 CSV 导出仅包含 `类型, 序号, 英文, 中文` 四列；坐标等内部字段只保留在 KV JSON 中。
 - `pageNum` 统一为**课本真实页码**（非单元内相对页码）
@@ -22,7 +22,7 @@
 - 前端会优先通过 Pages Functions 读取/写入 KV：`/api/annotations?unit=N`
 - 导出接口：
   - `GET /api/export-csv?unit=N`：从 KV 读取 JSON 标注并实时转换为 CSV 下载。
-- 本地 `localStorage` 保留为兜底缓存（用于离线或云端不可达时临时编辑）。
+- 页面保存成功后将数据写入 Cloudflare KV。
 - `/dashboard.html` 提供公开的单元选择、刷新统计和 CSV 下载入口。
 
 ### 1) 绑定 KV Namespace

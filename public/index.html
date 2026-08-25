@@ -298,7 +298,6 @@
         const PDF_WORKER_URL =
           'https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         const SCALE = 1.5;
-        const STORAGE_KEY = 'textbook-annotator:annotations:v1';
         const TOKEN_HIT_RATIO = 0.3;
         const AUTO_SAVE_INTERVAL_MS = 3 * 60 * 1000;
         const UNIT_CSV_COLUMNS = ['id', 'pen', 'pageNum', 'text', 'sourceText', 'zh', 'createdAt', 'rects'];
@@ -510,7 +509,7 @@
 
               const existingRects = Array.isArray(row.rects) ? row.rects : [];
               row.rects = [...existingRects, ...(Array.isArray(rects) ? rects : [])];
-              this.saveLocalAnnotations();
+              this.markAnnotationsDirty();
               this.repaintCurrentUnitHighlights();
               this.$nextTick(() => this.syncAnnotationTextareaHeights(annotationId));
               return true;
@@ -545,44 +544,7 @@
 
               this.clearNode(this.$refs.pdfContainer);
             },
-            loadLocalAnnotations() {
-              try {
-                const raw = localStorage.getItem(STORAGE_KEY);
-                if (!raw) return;
-                const parsed = JSON.parse(raw);
-                const merged = this.createEmptyUnitMap();
-                for (const key of Object.keys(merged)) {
-                  const list = parsed?.[key];
-                  merged[key] = Array.isArray(list)
-                    ? list.map((row) => ({
-                        ...row,
-                        pen:
-                          typeof row?.pen === 'string' && PEN_PRESETS.some((p) => p.id === row.pen)
-                            ? row.pen
-                            : PEN_PRESETS[0].id,
-                        text: typeof row?.text === 'string' ? row.text : '',
-                        sourceText:
-                          typeof row?.sourceText === 'string'
-                            ? row.sourceText
-                            : typeof row?.text === 'string'
-                              ? row.text
-                              : '',
-                        zh: typeof row?.zh === 'string' ? row.zh : ''
-                      }))
-                    : [];
-                }
-                this.annotationsByUnit = Object.fromEntries(
-                  Object.entries(merged).map(([unitKey, rows]) => {
-                    const unitId = Number(unitKey);
-                    return [unitKey, this.normalizeUnitRowsPageNums(unitId, rows, 'auto')];
-                  })
-                );
-              } catch (error) {
-                console.warn('读取 localStorage 失败，已忽略：', error);
-              }
-            },
-            saveLocalAnnotations() {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(this.annotationsByUnit));
+            markAnnotationsDirty() {
               this.hasUnsavedCsvChanges = true;
             },
 
@@ -658,7 +620,7 @@
               this.annotationsByUnit[String(unitNum)] = cloudRows;
               this.cancelAppend(true);
               this.annotationTextareaRefs = {};
-              this.saveLocalAnnotations();
+              this.markAnnotationsDirty();
               this.hasUnsavedCsvChanges = false;
               this.repaintCurrentUnitHighlights();
               this.$nextTick(() => {
@@ -735,7 +697,7 @@
               const idx = rows.findIndex((row) => row.id === annotationId);
               if (idx < 0) return;
               rows[idx].text = typeof editedText === 'string' ? editedText : '';
-              this.saveLocalAnnotations();
+              this.markAnnotationsDirty();
             },
             onAnnotationTextInput(annotationId, editedText) {
               this.updateAnnotationText(annotationId, editedText);
@@ -747,7 +709,7 @@
               const idx = rows.findIndex((row) => row.id === annotationId);
               if (idx < 0) return;
               rows[idx].text = typeof rows[idx].sourceText === 'string' ? rows[idx].sourceText : '';
-              this.saveLocalAnnotations();
+              this.markAnnotationsDirty();
               this.setStatus('已一键复原该条原始框选英文。');
               this.$nextTick(() => this.syncAnnotationTextareaHeights(annotationId));
             },
@@ -757,7 +719,7 @@
               const idx = rows.findIndex((row) => row.id === annotationId);
               if (idx < 0) return;
               rows[idx].zh = typeof zhText === 'string' ? zhText : '';
-              this.saveLocalAnnotations();
+              this.markAnnotationsDirty();
             },
             onAnnotationZhInput(annotationId, zhText) {
               this.updateAnnotationZh(annotationId, zhText);
@@ -1159,7 +1121,7 @@
               this.annotationsByUnit[currentUnitKey] = nextRows;
               this.cancelAppend(true);
               this.annotationTextareaRefs = {};
-              this.saveLocalAnnotations();
+              this.markAnnotationsDirty();
               this.hasUnsavedCsvChanges = false;
               this.repaintCurrentUnitHighlights();
               this.$nextTick(() => this.syncAllAnnotationTextareaHeights());
@@ -1177,7 +1139,7 @@
                 this.cancelAppend(true);
               }
               delete this.annotationTextareaRefs[annotationId];
-              this.saveLocalAnnotations();
+              this.markAnnotationsDirty();
               this.repaintCurrentUnitHighlights();
               this.setStatus(`Unit ${this.currentUnit}：已删除 1 条标注，剩余 ${rows.length} 条。`);
             },
@@ -1447,12 +1409,12 @@
 
               const unitKey = String(this.currentUnit);
               this.annotationsByUnit[unitKey].push(row);
-              this.saveLocalAnnotations();
+              this.markAnnotationsDirty();
               this.drawHighlightRects(pageDiv, rects, row);
               this.$nextTick(() => this.syncAnnotationTextareaHeights(row.id));
 
               this.setStatus(
-                `Unit ${this.currentUnit}：已标注 ${this.annotationsByUnit[unitKey].length} 条（分类：${this.getPenLabelById(row.pen)}，已保存到 localStorage）`
+                `Unit ${this.currentUnit}：已标注 ${this.annotationsByUnit[unitKey].length} 条（分类：${this.getPenLabelById(row.pen)}，待保存到云端）`
               );
             },
             drawHighlightRects(pageDiv, rects, annotation = null) {
@@ -1654,7 +1616,7 @@
               this.annotationsByUnit[key] = [];
               this.cancelAppend(true);
               this.annotationTextareaRefs = {};
-              this.saveLocalAnnotations();
+              this.markAnnotationsDirty();
               this.repaintCurrentUnitHighlights();
               this.setStatus(`Unit ${this.currentUnit} 标注已清空。`);
             },
@@ -1681,7 +1643,6 @@
             }
 
             pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
-            this.loadLocalAnnotations();
             window.addEventListener('keydown', this.onEsc);
             this.startAutoSaveTimer();
 
