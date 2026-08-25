@@ -3,39 +3,71 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>标注 Dashboard</title>
+    <title>汇总公告板</title>
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body class="bg-slate-50 text-slate-800">
-    <main class="max-w-4xl mx-auto p-4 space-y-4">
-      <header class="flex items-center gap-3 flex-wrap">
-        <h1 class="text-lg font-semibold">公开 Dashboard</h1>
-        <label class="text-sm">Unit:</label>
-        <select id="unitSelect" class="border rounded px-2 py-1 text-sm"></select>
-        <button id="refreshBtn" class="px-3 py-1 text-sm rounded border bg-white">刷新</button>
-        <a id="downloadBtn" class="px-3 py-1 text-sm rounded border bg-emerald-50 border-emerald-300 text-emerald-700" href="#">下载 CSV</a>
-        <span id="status" class="text-xs text-slate-500"></span>
+    <main class="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
+      <header class="bg-white border border-slate-200 rounded-lg px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h1 class="text-xl font-semibold tracking-tight">汇总公告板</h1>
+          <p class="text-xs text-slate-500 mt-1">8 个单元的标注进度与校对明细</p>
+        </div>
+        <div class="flex items-center justify-end gap-2 flex-wrap">
+          <label class="text-sm text-slate-600" for="unitSelect">查看</label>
+          <select id="unitSelect" class="border border-slate-300 rounded px-2 py-1.5 text-sm bg-white"></select>
+          <button id="refreshBtn" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">刷新</button>
+          <a id="downloadBtn" class="px-3 py-1.5 text-sm rounded border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" href="#">下载 CSV</a>
+          <span id="status" class="text-xs text-slate-500 min-w-[7rem]" role="status" aria-live="polite">准备加载</span>
+        </div>
       </header>
 
-      <section class="bg-white border rounded p-3">
-        <div class="text-sm mb-2">总数：<span id="total">0</span></div>
-        <pre id="summary" class="text-xs bg-slate-50 border rounded p-2 overflow-auto"></pre>
-      </section>
-
-      <section class="bg-white border rounded p-3">
-        <h2 class="text-sm font-medium mb-2">明细（前 200 条）</h2>
-        <div class="overflow-auto max-h-[60vh]">
-          <table class="min-w-full text-xs">
-            <thead class="bg-slate-100">
+      <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
+          <div>
+            <h2 class="text-base font-semibold">全单元统计</h2>
+            <p class="text-xs text-slate-500 mt-1">按标注类型汇总数量</p>
+          </div>
+          <strong id="grandTotal" class="text-lg text-slate-900">0</strong>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="bg-slate-100 text-slate-700">
               <tr>
-                <th class="text-left p-2">id</th>
-                <th class="text-left p-2">pen</th>
-                <th class="text-left p-2">pageNum</th>
-                <th class="text-left p-2">text</th>
-                <th class="text-left p-2">zh</th>
+                <th class="text-left font-semibold px-4 py-3">单元</th>
+                <th class="text-center font-semibold px-4 py-3">核心单词</th>
+                <th class="text-center font-semibold px-4 py-3">*拓展单词</th>
+                <th class="text-center font-semibold px-4 py-3">核心词组</th>
+                <th class="text-center font-semibold px-4 py-3">*拓展词组</th>
+                <th class="text-center font-semibold px-4 py-3">核心句子</th>
+                <th class="text-center font-semibold px-4 py-3">*拓展句子</th>
               </tr>
             </thead>
-            <tbody id="rows"></tbody>
+            <tbody id="summaryRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
+          <div>
+            <h2 id="detailTitle" class="text-base font-semibold">Unit 1 明细</h2>
+            <p class="text-xs text-slate-500 mt-1">按页码、类型和类型内编号排序</p>
+          </div>
+          <span id="detailTotal" class="text-sm text-slate-500">0 条</span>
+        </div>
+        <div class="overflow-auto max-h-[65vh]">
+          <table class="min-w-full text-sm">
+            <thead class="bg-slate-100 text-slate-700 sticky top-0">
+              <tr>
+                <th class="text-left font-semibold px-4 py-3">页码</th>
+                <th class="text-left font-semibold px-4 py-3">类型</th>
+                <th class="text-left font-semibold px-4 py-3">编号</th>
+                <th class="text-left font-semibold px-4 py-3">英文原文</th>
+                <th class="text-left font-semibold px-4 py-3">中文翻译</th>
+              </tr>
+            </thead>
+            <tbody id="detailRows"></tbody>
           </table>
         </div>
       </section>
@@ -43,57 +75,129 @@
 
     <script>
       const units = [1, 2, 3, 4, 5, 6, 7, 8];
+      const typeOrder = ['core_word', 'ext_word', 'core_phrase', 'ext_phrase', 'core_sentence', 'ext_sentence'];
+      const typeLabels = {
+        core_word: '核心单词',
+        ext_word: '*拓展单词',
+        core_phrase: '核心词组',
+        ext_phrase: '*拓展词组',
+        core_sentence: '核心句子',
+        ext_sentence: '*拓展句子'
+      };
       const unitSelect = document.getElementById('unitSelect');
       const statusEl = document.getElementById('status');
-      const totalEl = document.getElementById('total');
-      const summaryEl = document.getElementById('summary');
-      const rowsEl = document.getElementById('rows');
+      const grandTotalEl = document.getElementById('grandTotal');
+      const summaryRowsEl = document.getElementById('summaryRows');
+      const detailTitleEl = document.getElementById('detailTitle');
+      const detailTotalEl = document.getElementById('detailTotal');
+      const detailRowsEl = document.getElementById('detailRows');
       const downloadBtn = document.getElementById('downloadBtn');
+      let unitPayloads = new Map();
 
-      for (const u of units) {
-        const opt = document.createElement('option');
-        opt.value = String(u);
-        opt.textContent = `Unit ${u}`;
-        unitSelect.appendChild(opt);
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function getType(row) {
+        return typeLabels[row?.pen] ? row.pen : typeOrder.includes(row?.type) ? row.type : 'core_word';
+      }
+
+      function getRows(payload) {
+        return Array.isArray(payload?.annotations) ? payload.annotations : [];
+      }
+
+      function sortRows(rows) {
+        const counters = Object.fromEntries(typeOrder.map((type) => [type, 0]));
+        const sorted = [...rows].sort((a, b) => {
+          const pageA = Number.isFinite(Number(a?.pageNum)) ? Number(a.pageNum) : Number.MAX_SAFE_INTEGER;
+          const pageB = Number.isFinite(Number(b?.pageNum)) ? Number(b.pageNum) : Number.MAX_SAFE_INTEGER;
+          if (pageA !== pageB) return pageA - pageB;
+          const typeA = getType(a);
+          const typeB = getType(b);
+          const orderA = typeOrder.indexOf(typeA);
+          const orderB = typeOrder.indexOf(typeB);
+          if (orderA !== orderB) return orderA - orderB;
+          return Number(a?.manualOrder ?? Number.MAX_SAFE_INTEGER) - Number(b?.manualOrder ?? Number.MAX_SAFE_INTEGER);
+        });
+        return sorted.map((row) => {
+          const type = getType(row);
+          counters[type] += 1;
+          return { row, type, indexNum: counters[type] };
+        });
+      }
+
+      function renderSummary() {
+        let grandTotal = 0;
+        summaryRowsEl.innerHTML = units.map((unit) => {
+          const payload = unitPayloads.get(unit);
+          const counts = payload?.byPen || {};
+          const rows = getRows(payload);
+          grandTotal += rows.length;
+          return `<tr class="border-t border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-gray-50">
+            <td class="px-4 py-3 font-medium">Unit ${unit}</td>
+            ${typeOrder.map((type) => {
+              const count = Number(counts[type] ?? rows.filter((row) => getType(row) === type).length) || 0;
+              return `<td class="px-4 py-3 text-center ${count ? 'font-bold text-slate-900' : 'text-slate-400'}">${count || '-'}</td>`;
+            }).join('')}
+          </tr>`;
+        }).join('');
+        grandTotalEl.textContent = `${grandTotal} 条`;
+      }
+
+      function renderDetails(unit) {
+        const payload = unitPayloads.get(unit) || { annotations: [] };
+        const rows = sortRows(getRows(payload));
+        detailTitleEl.textContent = `Unit ${unit} 明细`;
+        detailTotalEl.textContent = `${rows.length} 条`;
+        downloadBtn.href = `/api/export-csv?unit=${encodeURIComponent(String(unit))}`;
+        if (!rows.length) {
+          detailRowsEl.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">暂无标注</td></tr>';
+          return;
+        }
+        detailRowsEl.innerHTML = rows.map(({ row, type, indexNum }) => `
+          <tr class="border-t border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-gray-50 align-top">
+            <td class="px-4 py-3 whitespace-nowrap">第 ${escapeHtml(Number(row?.pageNum) || '-')} 页</td>
+            <td class="px-4 py-3 whitespace-nowrap">${escapeHtml(typeLabels[type])}</td>
+            <td class="px-4 py-3 font-medium">${indexNum}</td>
+            <td class="px-4 py-3 min-w-[16rem]">${escapeHtml(row?.text || row?.enText || '-')}</td>
+            <td class="px-4 py-3 min-w-[12rem] ${row?.zh || row?.zhText ? 'text-slate-700' : 'text-slate-400'}">${escapeHtml(row?.zh || row?.zhText || '-')}</td>
+          </tr>`).join('');
       }
 
       async function load() {
-        const unit = Number(unitSelect.value || '1');
+        const selectedUnit = Number(unitSelect.value || '1');
         statusEl.textContent = '加载中...';
-        downloadBtn.href = `/api/export-csv?unit=${encodeURIComponent(String(unit))}`;
         try {
-          const res = await fetch('/api/annotations?unit=' + encodeURIComponent(String(unit)), { cache: 'no-store' });
-          const payload = await res.json();
-          if (!res.ok || !payload?.ok) {
-            throw new Error(payload?.error || `HTTP ${res.status}`);
-          }
-
-          totalEl.textContent = String(payload.total || 0);
-          summaryEl.textContent = JSON.stringify({ unit: payload.unit, byPen: payload.byPen || {}, updatedAt: payload.updatedAt || null }, null, 2);
-
-          const rows = Array.isArray(payload.annotations) ? payload.annotations.slice(0, 200) : [];
-          rowsEl.innerHTML = '';
-          for (const row of rows) {
-            const tr = document.createElement('tr');
-            tr.className = 'border-b';
-            tr.innerHTML = `
-              <td class="p-2">${String(row?.id || '')}</td>
-              <td class="p-2">${String(row?.pen || '')}</td>
-              <td class="p-2">${Number(row?.pageNum || '')}</td>
-              <td class="p-2">${String(row?.text || '').replace(/</g, '&lt;')}</td>
-              <td class="p-2">${String(row?.zh || '').replace(/</g, '&lt;')}</td>
-            `;
-            rowsEl.appendChild(tr);
-          }
-          statusEl.textContent = `已加载 Unit ${unit}`;
-        } catch (err) {
-          statusEl.textContent = `加载失败：${String(err?.message || err)}`;
+          const results = await Promise.all(units.map(async (unit) => {
+            const response = await fetch('/api/annotations?unit=' + encodeURIComponent(String(unit)), { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok || !payload?.ok) throw new Error(payload?.error || `Unit ${unit} HTTP ${response.status}`);
+            return [unit, payload];
+          }));
+          unitPayloads = new Map(results);
+          renderSummary();
+          renderDetails(selectedUnit);
+          statusEl.textContent = '已同步 8 个单元';
+        } catch (error) {
+          statusEl.textContent = `加载失败：${String(error?.message || error)}`;
+          renderDetails(selectedUnit);
         }
       }
 
-      document.getElementById('refreshBtn').addEventListener('click', load);
-      unitSelect.addEventListener('change', load);
+      for (const unit of units) {
+        const option = document.createElement('option');
+        option.value = String(unit);
+        option.textContent = `Unit ${unit}`;
+        unitSelect.appendChild(option);
+      }
       unitSelect.value = '1';
+      unitSelect.addEventListener('change', () => renderDetails(Number(unitSelect.value)));
+      document.getElementById('refreshBtn').addEventListener('click', load);
       load();
     </script>
   </body>

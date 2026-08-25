@@ -151,19 +151,19 @@
           </div>
         </div>
 
-        <div class="flex items-center justify-between gap-3 flex-nowrap overflow-x-auto whitespace-nowrap pb-1">
+        <div class="flex items-center justify-between gap-3 flex-nowrap overflow-x-auto whitespace-nowrap pt-3">
           <span class="text-sm text-slate-500 shrink-0">当前单元标注 {{ currentUnitCount }} 条</span>
           <div class="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              class="text-sm rounded px-3 py-1 border border-slate-300 bg-white text-slate-700 shrink-0"
+              class="px-4 py-1.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 shrink-0"
               @click="disablePen"
             >
               退出标注
             </button>
             <button
             type="button"
-            class="text-sm rounded px-3 py-1 border border-slate-300 bg-white text-slate-700 shrink-0"
+            class="px-4 py-1.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 shrink-0"
             @click="clearCurrentUnit"
           >
             清空本单元
@@ -171,7 +171,7 @@
 
             <button
             type="button"
-            class="text-sm rounded px-3 py-1 border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shrink-0"
+            class="px-4 py-1.5 text-sm font-medium rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shrink-0"
             @click="saveCurrentUnitCsvManual"
           >
             保存
@@ -179,7 +179,7 @@
 
             <a
             href="/dashboard.html"
-            class="text-xs rounded px-2 py-1 border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 shrink-0"
+            class="px-4 py-1.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 shrink-0"
             target="_blank"
             rel="noopener"
           >
@@ -192,7 +192,7 @@
       <main class="max-w-[1400px] mx-auto px-3 py-3">
         <div
           class="grid grid-cols-1 gap-3 items-start"
-          :class="isSidebarExpanded ? 'lg:grid-cols-[1fr_310px]' : 'lg:grid-cols-1'"
+          :class="isSidebarExpanded ? 'lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]' : 'lg:grid-cols-1'"
         >
           <section class="min-w-0">
             <div ref="pdfContainer" aria-live="polite"></div>
@@ -239,7 +239,7 @@
                   </span>
                   <div class="min-w-0 flex-1 pt-0.5">
                     <div
-                      class="text-xs font-semibold leading-5"
+                      class="text-xs font-semibold leading-5 whitespace-nowrap"
                       :style="{ color: getPenStrongColorById(entry.penId) }"
                     >
                       {{ getPenBadgeLabelById(entry.penId) }}
