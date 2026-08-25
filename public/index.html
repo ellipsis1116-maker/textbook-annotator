@@ -94,24 +94,39 @@
   <body>
     <div id="app" :class="['min-h-screen', penEnabled ? 'pen-mode' : '']">
       <header
-        class="sticky top-0 z-50 bg-white border-b border-slate-200 px-4 py-3 flex flex-wrap items-center gap-3"
+        class="sticky top-0 z-50 bg-white border-b border-slate-200 px-4 py-3"
       >
-        <h1 class="text-sm sm:text-base font-semibold text-slate-800 mr-2">
-          课本 PDF 在线标注（单文件静态版）
-        </h1>
+        <div class="flex items-center gap-3 min-w-0 mb-2">
+          <h1 class="text-sm sm:text-base font-semibold text-slate-800 shrink-0">
+            课本 PDF 在线标注（单文件静态版）
+          </h1>
 
-        <label class="text-sm text-slate-700" for="unitSelect">单元：</label>
-        <select
-          id="unitSelect"
-          class="border border-slate-300 rounded px-2 py-1 text-sm"
-          v-model.number="currentUnit"
-          :disabled="isUnitLoading"
-          @change="onUnitChange"
-        >
-          <option v-for="u in units" :key="u" :value="u">Unit {{ u }}</option>
-        </select>
+          <label class="text-sm text-slate-700 shrink-0" for="unitSelect">单元：</label>
+          <select
+            id="unitSelect"
+            class="border border-slate-300 rounded px-2 py-1 text-sm shrink-0"
+            v-model.number="currentUnit"
+            :disabled="isUnitLoading"
+            @change="onUnitChange"
+          >
+            <option v-for="u in units" :key="u" :value="u">Unit {{ u }}</option>
+          </select>
 
-        <div class="flex items-center gap-2 flex-wrap">
+          <span
+            class="text-xs text-slate-600 min-w-0 truncate"
+            role="status"
+            aria-live="polite"
+          >
+            {{ status }}
+          </span>
+
+          <span class="text-xs text-slate-500 shrink-0 ml-auto">
+            当前单元标注 {{ currentUnitCount }} 条
+          </span>
+        </div>
+
+        <div class="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
+          <div class="flex items-center gap-2 shrink-0">
           <span class="text-xs text-slate-600">标注分类：</span>
           <button
             v-for="pen in pens"
@@ -143,44 +158,33 @@
           >
             退出标注
           </button>
+          </div>
+
+          <button
+            type="button"
+            class="text-sm rounded px-3 py-1 border border-slate-300 bg-white text-slate-700 shrink-0"
+            @click="clearCurrentUnit"
+          >
+            清空本单元
+          </button>
+
+          <button
+            type="button"
+            class="text-sm rounded px-3 py-1 border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shrink-0"
+            @click="saveCurrentUnitCsvManual"
+          >
+            保存
+          </button>
+
+          <a
+            href="/dashboard.html"
+            class="text-xs rounded px-2 py-1 border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 shrink-0"
+            target="_blank"
+            rel="noopener"
+          >
+            打开公开 Dashboard
+          </a>
         </div>
-
-        <span
-          class="text-xs text-slate-600 min-w-[180px] max-w-[360px] truncate"
-          role="status"
-          aria-live="polite"
-        >
-          {{ status }}
-        </span>
-
-        <button
-          type="button"
-          class="text-sm rounded px-3 py-1 border border-slate-300 bg-white text-slate-700"
-          @click="clearCurrentUnit"
-        >
-          清空本单元标注
-        </button>
-
-        <button
-          type="button"
-          class="text-sm rounded px-3 py-1 border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-          @click="saveCurrentUnitCsvManual"
-        >
-          保存
-        </button>
-
-        <a
-          href="/dashboard.html"
-          class="text-xs rounded px-2 py-1 border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 ml-auto"
-          target="_blank"
-          rel="noopener"
-        >
-          打开公开 Dashboard
-        </a>
-
-        <span class="text-xs text-slate-500">
-          当前单元标注 {{ currentUnitCount }} 条（KV 云端 + localStorage 兜底）
-        </span>
       </header>
 
       <main class="max-w-[1400px] mx-auto px-3 py-3">
@@ -194,7 +198,7 @@
 
           <aside
             v-if="isSidebarExpanded"
-            class="bg-white border border-slate-200 rounded p-3 lg:sticky lg:top-[74px]"
+            class="annotation-list bg-white border border-slate-200 rounded p-3 pt-6 lg:sticky lg:top-[116px]"
           >
             <div class="flex items-center justify-between mb-3">
               <h2 class="text-sm font-semibold text-slate-800">本单元标注列表</h2>
@@ -1158,43 +1162,6 @@
               return { ok: true, imported: nextRows.length };
             },
 
-            async tryLoadCurrentUnitCsvIfPresent(loadToken = this.currentLoadToken) {
-              const cloudResult = await this.loadUnitCsvFromCloud(this.currentUnit, loadToken);
-              if (loadToken !== this.currentLoadToken || cloudResult.stale) return false;
-              if (cloudResult.ok && cloudResult.exists) {
-                this.setStatus(`已自动载入云端 Unit ${this.currentUnit}（${cloudResult.imported} 条）。`);
-                return true;
-              }
-
-              const unitNum = Number(this.currentUnit);
-              const candidates = [
-                `/wordlist/unit${unitNum}-annotations.csv`,
-                `/wordlist/Unit${unitNum}.csv`,
-                `/wordlist/unit${unitNum}.csv`,
-                `/wordlist/Unit${unitNum}-annotations.csv`
-              ];
-              for (const path of candidates) {
-                try {
-                  const response = await fetch(path, { cache: 'no-store' });
-                  if (loadToken !== this.currentLoadToken) return false;
-                  if (!response.ok) continue;
-                  const csvText = await response.text();
-                  if (loadToken !== this.currentLoadToken) return false;
-                  const result = this.importCurrentUnitFromCsvText(csvText, path);
-                  if (result.ok) {
-                    this.setStatus(`已载入本地初始数据 Unit ${unitNum}（${result.imported} 条）。`);
-                    return true;
-                  }
-                } catch (error) {
-                  console.warn(`读取本地初始文件失败：${path}`, error);
-                }
-              }
-
-              this.setStatus(
-                cloudResult.message || `Unit ${this.currentUnit} 暂无云端或本地初始数据。`
-              );
-              return false;
-            },
             deleteAnnotation(annotationId) {
               const unitKey = String(this.currentUnit);
               const rows = this.annotationsByUnit[unitKey] || [];
@@ -1664,8 +1631,13 @@
                 if (loadToken !== this.currentLoadToken) return;
                 await this.renderPdfForUnit(this.currentUnit, loadToken);
                 if (loadToken !== this.currentLoadToken) return;
-                await this.tryLoadCurrentUnitCsvIfPresent(loadToken);
+                const cloudResult = await this.loadUnitCsvFromCloud(this.currentUnit, loadToken);
                 if (loadToken !== this.currentLoadToken) return;
+                this.setStatus(
+                  cloudResult.ok
+                    ? `已载入云端 Unit ${this.currentUnit}（${cloudResult.imported} 条）。`
+                    : cloudResult.message || `Unit ${this.currentUnit} 暂无云端数据，当前为 0 条。`
+                );
                 this.$nextTick(() => {
                   if (loadToken === this.currentLoadToken) this.syncAllAnnotationTextareaHeights();
                 });
@@ -1714,7 +1686,13 @@
             try {
               await this.renderPdfForUnit(this.currentUnit, loadToken);
               if (loadToken !== this.currentLoadToken) return;
-              await this.tryLoadCurrentUnitCsvIfPresent(loadToken);
+              const cloudResult = await this.loadUnitCsvFromCloud(this.currentUnit, loadToken);
+              if (loadToken !== this.currentLoadToken) return;
+              this.setStatus(
+                cloudResult.ok
+                  ? `已载入云端 Unit ${this.currentUnit}（${cloudResult.imported} 条）。`
+                  : cloudResult.message || `Unit ${this.currentUnit} 暂无云端数据，当前为 0 条。`
+              );
             } catch (error) {
               this.setStatus(`加载失败：${String(error?.message || error)}`);
               console.error(error);

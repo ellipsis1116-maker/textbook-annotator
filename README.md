@@ -13,9 +13,8 @@
 - PDF：`public/pdfs/unit1.pdf` ~ `public/pdfs/unit8.pdf`
 - 标注数据存储在 Cloudflare KV。
 - 本地 `localStorage` 作为兜底缓存。
-- 自动加载顺序：优先尝试从 KV 加载，失败则尝试从 `/wordlist/unitN-annotations.csv` 等静态文件加载（仅限 `index.html`）。
+- 自动加载仅从 KV 读取；KV 为空时页面显示 0 条，保存后写入 KV。
 - 云端 CSV 导出仅包含 `类型, 序号, 英文, 中文` 四列；坐标等内部字段只保留在 KV JSON 中。
-- 当前仓库的历史兜底文件位于 `public/wordlist/`，例如 `unit1-annotations.csv`。
 - `pageNum` 统一为**课本真实页码**（非单元内相对页码）
 
 ## Cloudflare KV 云端持久化（新增）
