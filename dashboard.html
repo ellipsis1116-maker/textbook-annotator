@@ -7,21 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body class="bg-slate-50 text-slate-800">
-    <main class="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
-      <header class="bg-white border border-slate-200 rounded-lg px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 class="text-xl font-semibold tracking-tight">汇总公告板</h1>
-          <p class="text-xs text-slate-500 mt-1">8 个单元的标注进度与校对明细</p>
-        </div>
-        <div class="flex items-center justify-end gap-2 flex-wrap">
-          <label class="text-sm text-slate-600" for="unitSelect">查看</label>
-          <select id="unitSelect" class="border border-slate-300 rounded px-2 py-1.5 text-sm bg-white"></select>
-          <button id="refreshBtn" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">刷新</button>
-          <a id="downloadBtn" class="px-3 py-1.5 text-sm rounded border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" href="#">下载 CSV</a>
-          <span id="status" class="text-xs text-slate-500 min-w-[7rem]" role="status" aria-live="polite">准备加载</span>
-        </div>
-      </header>
-
+    <main class="max-w-6xl mx-auto p-4 sm:p-6 space-y-4">
       <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">
         <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
           <div>
@@ -39,8 +25,8 @@
                 <th class="text-center font-semibold px-4 py-3">*拓展单词</th>
                 <th class="text-center font-semibold px-4 py-3">核心词组</th>
                 <th class="text-center font-semibold px-4 py-3">*拓展词组</th>
-                <th class="text-center font-semibold px-4 py-3">核心句子</th>
-                <th class="text-center font-semibold px-4 py-3">*拓展句子</th>
+                <th class="text-center font-semibold px-4 py-3">核心句</th>
+                <th class="text-center font-semibold px-4 py-3">*拓展句</th>
               </tr>
             </thead>
             <tbody id="summaryRows"></tbody>
@@ -49,6 +35,13 @@
       </section>
 
       <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div class="px-4 py-2.5 border-b border-slate-200 flex items-center justify-end gap-2 flex-wrap">
+          <label class="text-sm text-slate-600" for="unitSelect">查看</label>
+          <select id="unitSelect" class="border border-slate-300 rounded px-2 py-1.5 text-sm bg-white"></select>
+          <button id="refreshBtn" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">刷新</button>
+          <a id="downloadBtn" class="px-3 py-1.5 text-sm rounded border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" href="#">下载 CSV</a>
+          <span id="status" class="text-xs text-slate-500 min-w-[7rem]" role="status" aria-live="polite">准备加载</span>
+        </div>
         <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
           <div>
             <h2 id="detailTitle" class="text-base font-semibold">Unit 1 明细</h2>
@@ -81,8 +74,8 @@
         ext_word: '*拓展单词',
         core_phrase: '核心词组',
         ext_phrase: '*拓展词组',
-        core_sentence: '核心句子',
-        ext_sentence: '*拓展句子'
+        core_sentence: '核心句',
+        ext_sentence: '*拓展句'
       };
       const unitSelect = document.getElementById('unitSelect');
       const statusEl = document.getElementById('status');
