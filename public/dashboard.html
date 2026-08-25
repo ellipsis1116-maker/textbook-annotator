@@ -62,7 +62,7 @@
         statusEl.textContent = '加载中...';
         downloadBtn.href = `/api/export-csv?unit=${encodeURIComponent(String(unit))}`;
         try {
-          const res = await fetch(`/api/annotations?unit=${encodeURIComponent(String(unit))}`, { cache: 'no-store' });
+          const res = await fetch('/api/annotations?unit=' + encodeURIComponent(String(unit)), { cache: 'no-store' });
           const payload = await res.json();
           if (!res.ok || !payload?.ok) {
             throw new Error(payload?.error || `HTTP ${res.status}`);

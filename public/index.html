@@ -555,7 +555,7 @@
               }
 
               const annotations = this.annotationsByUnit[String(unitNum)] || [];
-              const response = await fetch(`/api/annotations?unit=${encodeURIComponent(String(unitNum))}`, {
+              const response = await fetch('/api/annotations?unit=' + encodeURIComponent(String(unitNum)), {
                 method: 'POST',
                 headers: {
                   'content-type': 'application/json'
@@ -593,7 +593,7 @@
               }
 
               const response = await fetch(
-                `/api/annotations?unit=${encodeURIComponent(String(unitNum))}`,
+                '/api/annotations?unit=' + encodeURIComponent(String(unitNum)),
                 {
                   method: 'GET',
                   cache: 'no-store'
