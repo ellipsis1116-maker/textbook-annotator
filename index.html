@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>课本 PDF 在线标注（单文件静态版）</title>
+    <title>课本 PDF 在线标注</title>
 
     <link
       rel="stylesheet"
@@ -98,7 +98,7 @@
       >
         <div class="flex items-center gap-3 min-w-0 mb-2">
           <h1 class="text-sm sm:text-base font-semibold text-slate-800 shrink-0">
-            课本 PDF 在线标注（单文件静态版）
+            课本 PDF 在线标注
           </h1>
 
           <label class="text-sm text-slate-700 shrink-0" for="unitSelect">单元：</label>
@@ -120,19 +120,16 @@
             {{ status }}
           </span>
 
-          <span class="text-xs text-slate-500 shrink-0 ml-auto">
-            当前单元标注 {{ currentUnitCount }} 条
-          </span>
         </div>
 
         <div class="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
           <div class="flex items-center gap-2 shrink-0">
-          <span class="text-xs text-slate-600">标注分类：</span>
+          <span class="text-sm font-medium text-slate-600">标注分类：</span>
           <button
             v-for="pen in pens"
             :key="pen.id"
             type="button"
-            class="relative text-xs rounded-full border px-3 py-1 transition inline-flex items-center gap-1.5"
+            class="relative text-base font-medium rounded-full border px-4 py-1.5 transition inline-flex items-center gap-1.5"
             :class="penEnabled && activePen === pen.id ? 'text-white border-transparent' : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400'"
             :style="penEnabled && activePen === pen.id ? { backgroundColor: pen.colorStrong } : {}"
             :title="pen.label"
@@ -151,39 +148,44 @@
               {{ currentUnitColorCount[pen.id] || 0 }}
             </span>
           </button>
-          <button
-            type="button"
-            class="text-xs rounded-full border border-slate-300 px-3 py-1 bg-white text-slate-700 hover:border-slate-400"
-            @click="disablePen"
-          >
-            退出标注
-          </button>
           </div>
+        </div>
 
-          <button
+        <div class="flex items-center justify-between gap-3 flex-nowrap overflow-x-auto whitespace-nowrap pb-1">
+          <span class="text-sm text-slate-500 shrink-0">当前单元标注 {{ currentUnitCount }} 条</span>
+          <div class="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              class="text-sm rounded px-3 py-1 border border-slate-300 bg-white text-slate-700 shrink-0"
+              @click="disablePen"
+            >
+              退出标注
+            </button>
+            <button
             type="button"
             class="text-sm rounded px-3 py-1 border border-slate-300 bg-white text-slate-700 shrink-0"
             @click="clearCurrentUnit"
           >
             清空本单元
-          </button>
+            </button>
 
-          <button
+            <button
             type="button"
             class="text-sm rounded px-3 py-1 border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shrink-0"
             @click="saveCurrentUnitCsvManual"
           >
             保存
-          </button>
+            </button>
 
-          <a
+            <a
             href="/dashboard.html"
             class="text-xs rounded px-2 py-1 border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 shrink-0"
             target="_blank"
             rel="noopener"
           >
-            打开公开 Dashboard
-          </a>
+              查看汇总
+            </a>
+          </div>
         </div>
       </header>
 
@@ -202,16 +204,25 @@
           >
             <div class="flex items-center justify-between mb-3">
               <h2 class="text-sm font-semibold text-slate-800">本单元标注列表</h2>
-              <span class="text-xs text-slate-500">{{ currentUnitCount }} 条</span>
+              <select
+                class="border border-slate-300 rounded px-2 py-1 text-xs"
+                v-model="annotationFilter"
+                aria-label="筛选标注类型"
+              >
+                <option value="all">全部类型</option>
+                <option v-for="pen in pens" :key="`filter-${pen.id}`" :value="pen.id">
+                  {{ getPenBadgeLabelById(pen.id) }}
+                </option>
+              </select>
             </div>
 
-            <div v-if="!currentUnitSortedAnnotations.length" class="text-xs text-slate-500 leading-6">
+            <div v-if="!currentUnitDisplayAnnotations.length" class="text-xs text-slate-500 leading-6">
               暂无标注。点击上方分类按钮后，在课本文字上拖拽框选，标注会自动出现在这里。
             </div>
 
             <div v-else class="space-y-3 max-h-[72vh] overflow-auto pr-1">
               <article
-                v-for="entry in currentUnitSortedAnnotations"
+                v-for="entry in currentUnitDisplayAnnotations"
                 :key="entry.row.id"
                 class="border rounded p-2"
                 :class="[
@@ -250,6 +261,22 @@
                       @click="restoreAnnotationText(entry.row.id)"
                     >
                       复原英文
+                    </button>
+                    <button
+                      type="button"
+                      class="text-[11px] px-2 py-1 rounded border border-slate-300 text-slate-600 bg-white hover:bg-slate-100 disabled:opacity-40"
+                      :disabled="entry.displayIndex === 0"
+                      @click="moveAnnotation(entry.row.id, -1)"
+                    >
+                      ↑ 上移
+                    </button>
+                    <button
+                      type="button"
+                      class="text-[11px] px-2 py-1 rounded border border-slate-300 text-slate-600 bg-white hover:bg-slate-100 disabled:opacity-40"
+                      :disabled="entry.displayIndex === currentUnitDisplayAnnotations.length - 1"
+                      @click="moveAnnotation(entry.row.id, 1)"
+                    >
+                      ↓ 下移
                     </button>
                     <button
                       type="button"
@@ -337,19 +364,19 @@
           },
           {
             id: 'ext_word',
-            label: '拓展单词',
+            label: '*拓展单词',
             color: 'rgba(37, 99, 235, 0.35)',
             colorStrong: '#2563eb'
           },
           {
             id: 'ext_phrase',
-            label: '拓展词组',
+            label: '*拓展词组',
             color: 'rgba(147, 51, 234, 0.32)',
             colorStrong: '#9333ea'
           },
           {
             id: 'core_sentence',
-            label: '核心句',
+            label: '核心句子',
             color: 'rgba(245, 158, 11, 0.36)',
             colorStrong: '#f59e0b'
           },
@@ -383,6 +410,7 @@
               penEnabled: false,
               pens: PEN_PRESETS,
               activePen: PEN_PRESETS[0].id,
+              annotationFilter: 'all',
               dragState: null,
               status: '正在初始化...',
               annotationsByUnit: this.createEmptyUnitMap(),
@@ -403,9 +431,18 @@
             currentUnitAnnotations() {
               return this.annotationsByUnit[String(this.currentUnit)] || [];
             },
+            currentUnitDisplayAnnotations() {
+              if (this.annotationFilter === 'all') return this.currentUnitSortedAnnotations;
+              return this.currentUnitSortedAnnotations.filter(
+                (entry) => entry.penId === this.annotationFilter
+              ).map((entry, displayIndex) => ({ ...entry, displayIndex }));
+            },
             currentUnitSortedAnnotations() {
               const rows = [...this.currentUnitAnnotations];
               rows.sort((a, b) => {
+                const manualOrderA = Number.isFinite(Number(a?.manualOrder)) ? Number(a.manualOrder) : Number.MAX_SAFE_INTEGER;
+                const manualOrderB = Number.isFinite(Number(b?.manualOrder)) ? Number(b.manualOrder) : Number.MAX_SAFE_INTEGER;
+                if (manualOrderA !== manualOrderB) return manualOrderA - manualOrderB;
                 const penA = this.normalizePenId(a?.pen);
                 const penB = this.normalizePenId(b?.pen);
                 const orderA = this.getPenSortIndex(penA);
@@ -424,13 +461,14 @@
               });
 
               const byPenCounter = Object.fromEntries(this.pens.map((pen) => [pen.id, 0]));
-              return rows.map((row) => {
+              return rows.map((row, displayIndex) => {
                 const penId = this.normalizePenId(row?.pen);
                 byPenCounter[penId] = (byPenCounter[penId] || 0) + 1;
                 return {
                   row,
                   penId,
-                  categoryIndex: byPenCounter[penId]
+                  categoryIndex: byPenCounter[penId],
+                  displayIndex
                 };
               });
             },
@@ -656,13 +694,13 @@
                 case 'core_word':
                   return '核心词';
                 case 'ext_word':
-                  return '*拓展词';
+                  return '*拓展单词';
                 case 'core_phrase':
                   return '核心词组';
                 case 'ext_phrase':
                   return '*拓展词组';
                 case 'core_sentence':
-                  return '核心句';
+                  return '核心句子';
                 case 'ext_sentence':
                   return '*拓展句子';
                 default:
@@ -1142,6 +1180,27 @@
               this.markAnnotationsDirty();
               this.repaintCurrentUnitHighlights();
               this.setStatus(`Unit ${this.currentUnit}：已删除 1 条标注，剩余 ${rows.length} 条。`);
+            },
+            moveAnnotation(annotationId, direction) {
+              const displayRows = this.currentUnitDisplayAnnotations;
+              const currentIndex = displayRows.findIndex((entry) => entry.row.id === annotationId);
+              const targetIndex = currentIndex + direction;
+              if (currentIndex < 0 || targetIndex < 0 || targetIndex >= displayRows.length) return;
+
+              const rows = this.currentUnitAnnotations;
+              const currentRow = displayRows[currentIndex].row;
+              const targetRow = displayRows[targetIndex].row;
+              const currentArrayIndex = rows.indexOf(currentRow);
+              const targetArrayIndex = rows.indexOf(targetRow);
+              if (currentArrayIndex < 0 || targetArrayIndex < 0) return;
+
+              [rows[currentArrayIndex], rows[targetArrayIndex]] = [rows[targetArrayIndex], rows[currentArrayIndex]];
+              rows.forEach((row, index) => {
+                row.manualOrder = index;
+              });
+              this.markAnnotationsDirty();
+              this.repaintCurrentUnitHighlights();
+              this.setStatus(`Unit ${this.currentUnit}：已调整词条顺序。`);
             },
             findAnnotationByPoint(pageDiv, x, y) {
               const rows = this.annotationsByUnit[String(this.currentUnit)] || [];

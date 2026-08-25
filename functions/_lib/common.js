@@ -44,6 +44,7 @@ export function normalizeAnnotationRow(raw = {}) {
     sourceText: String(row.sourceText || row.text || ''),
     zh: String(row.zh || ''),
     createdAt: Number.isFinite(Number(row.createdAt)) ? Number(row.createdAt) : Date.now(),
+    manualOrder: Number.isFinite(Number(row.manualOrder)) ? Number(row.manualOrder) : null,
     rects
   };
 }
