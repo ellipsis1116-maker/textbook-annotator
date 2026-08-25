@@ -214,6 +214,13 @@
                   {{ getPenBadgeLabelById(pen.id) }}
                 </option>
               </select>
+              <button
+                type="button"
+                class="px-3 py-1 text-xs font-medium rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 whitespace-nowrap"
+                @click="addManualAnnotation"
+              >
+                + 手动添加
+              </button>
             </div>
 
             <div v-if="!currentUnitDisplayAnnotations.length" class="text-xs text-slate-500 leading-6">
@@ -224,6 +231,10 @@
               <article
                 v-for="entry in currentUnitDisplayAnnotations"
                 :key="entry.row.id"
+                draggable="true"
+                @dragstart="startAnnotationDrag(entry.row.id, $event)"
+                @dragover.prevent
+                @drop="dropAnnotation(entry.row.id, $event)"
                 class="border rounded p-2"
                 :class="[
                   hasZhText(entry.row.zh) ? 'border-slate-200 bg-slate-50' : 'border-red-300 bg-red-50/40',
@@ -238,12 +249,16 @@
                     {{ entry.categoryIndex }}
                   </span>
                   <div class="min-w-0 flex-1 pt-0.5">
-                    <div
-                      class="text-xs font-semibold leading-5 whitespace-nowrap"
-                      :style="{ color: getPenStrongColorById(entry.penId) }"
+                    <select
+                      class="text-xs font-semibold leading-5 whitespace-nowrap bg-transparent border-0 p-0"
+                      v-model="entry.row.pen"
+                      @change="onAnnotationTypeChange(entry.row)"
+                      :aria-label="`标注类型 ${entry.categoryIndex}`"
                     >
-                      {{ getPenBadgeLabelById(entry.penId) }}
-                    </div>
+                      <option v-for="pen in pens" :key="`entry-${pen.id}`" :value="pen.id">
+                        {{ getPenBadgeLabelById(pen.id) }}
+                      </option>
+                    </select>
                   </div>
                   <div class="flex items-center gap-1.5">
                     <button
@@ -261,22 +276,6 @@
                       @click="restoreAnnotationText(entry.row.id)"
                     >
                       复原英文
-                    </button>
-                    <button
-                      type="button"
-                      class="text-[11px] px-2 py-1 rounded border border-slate-300 text-slate-600 bg-white hover:bg-slate-100 disabled:opacity-40"
-                      :disabled="entry.displayIndex === 0"
-                      @click="moveAnnotation(entry.row.id, -1)"
-                    >
-                      ↑ 上移
-                    </button>
-                    <button
-                      type="button"
-                      class="text-[11px] px-2 py-1 rounded border border-slate-300 text-slate-600 bg-white hover:bg-slate-100 disabled:opacity-40"
-                      :disabled="entry.displayIndex === currentUnitDisplayAnnotations.length - 1"
-                      @click="moveAnnotation(entry.row.id, 1)"
-                    >
-                      ↓ 下移
                     </button>
                     <button
                       type="button"
@@ -357,16 +356,16 @@
             colorStrong: '#2563eb'
           },
           {
-            id: 'core_phrase',
-            label: '核心词组',
-            color: 'rgba(147, 51, 234, 0.32)',
-            colorStrong: '#9333ea'
-          },
-          {
             id: 'ext_word',
             label: '*拓展单词',
             color: 'rgba(37, 99, 235, 0.35)',
             colorStrong: '#2563eb'
+          },
+          {
+            id: 'core_phrase',
+            label: '核心词组',
+            color: 'rgba(147, 51, 234, 0.32)',
+            colorStrong: '#9333ea'
           },
           {
             id: 'ext_phrase',
@@ -376,13 +375,13 @@
           },
           {
             id: 'core_sentence',
-            label: '核心句子',
+            label: '核心句',
             color: 'rgba(245, 158, 11, 0.36)',
             colorStrong: '#f59e0b'
           },
           {
             id: 'ext_sentence',
-            label: '拓展句子',
+            label: '*拓展句',
             color: 'rgba(245, 158, 11, 0.36)',
             colorStrong: '#f59e0b'
           }
@@ -411,6 +410,7 @@
               pens: PEN_PRESETS,
               activePen: PEN_PRESETS[0].id,
               annotationFilter: 'all',
+              draggedAnnotationId: null,
               dragState: null,
               status: '正在初始化...',
               annotationsByUnit: this.createEmptyUnitMap(),
@@ -700,9 +700,9 @@
                 case 'ext_phrase':
                   return '*拓展词组';
                 case 'core_sentence':
-                  return '核心句子';
+                  return '核心句';
                 case 'ext_sentence':
-                  return '*拓展句子';
+                  return '*拓展句';
                 default:
                   return '核心词';
               }
@@ -1181,20 +1181,51 @@
               this.repaintCurrentUnitHighlights();
               this.setStatus(`Unit ${this.currentUnit}：已删除 1 条标注，剩余 ${rows.length} 条。`);
             },
-            moveAnnotation(annotationId, direction) {
-              const displayRows = this.currentUnitDisplayAnnotations;
-              const currentIndex = displayRows.findIndex((entry) => entry.row.id === annotationId);
-              const targetIndex = currentIndex + direction;
-              if (currentIndex < 0 || targetIndex < 0 || targetIndex >= displayRows.length) return;
+            addManualAnnotation() {
+              const rows = this.currentUnitAnnotations;
+              const pen = this.pens.some((item) => item.id === this.activePen)
+                ? this.activePen
+                : 'core_phrase';
+              const row = {
+                id: crypto.randomUUID(),
+                pageNum: this.getUnitPageRange(this.currentUnit).start,
+                text: '',
+                sourceText: '',
+                zh: '',
+                rects: [],
+                pen,
+                manualOrder: rows.length,
+                createdAt: Date.now()
+              };
+              rows.push(row);
+              this.markAnnotationsDirty();
+              this.annotationFilter = 'all';
+              this.setStatus(`Unit ${this.currentUnit}：已添加手动标注，请填写英文和中文。`);
+              this.$nextTick(() => this.syncAnnotationTextareaHeights(row.id));
+            },
+            onAnnotationTypeChange(row) {
+              row.pen = this.normalizePenId(row.pen);
+              this.markAnnotationsDirty();
+              this.repaintCurrentUnitHighlights();
+              this.setStatus(`Unit ${this.currentUnit}：已更新标注分类。`);
+            },
+            startAnnotationDrag(annotationId, event) {
+              this.draggedAnnotationId = annotationId;
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('text/plain', annotationId);
+            },
+            dropAnnotation(targetId, event) {
+              event.preventDefault();
+              const sourceId = this.draggedAnnotationId || event.dataTransfer.getData('text/plain');
+              this.draggedAnnotationId = null;
+              if (!sourceId || sourceId === targetId) return;
 
               const rows = this.currentUnitAnnotations;
-              const currentRow = displayRows[currentIndex].row;
-              const targetRow = displayRows[targetIndex].row;
-              const currentArrayIndex = rows.indexOf(currentRow);
-              const targetArrayIndex = rows.indexOf(targetRow);
-              if (currentArrayIndex < 0 || targetArrayIndex < 0) return;
-
-              [rows[currentArrayIndex], rows[targetArrayIndex]] = [rows[targetArrayIndex], rows[currentArrayIndex]];
+              const sourceIndex = rows.findIndex((row) => row.id === sourceId);
+              const targetIndex = rows.findIndex((row) => row.id === targetId);
+              if (sourceIndex < 0 || targetIndex < 0) return;
+              const [sourceRow] = rows.splice(sourceIndex, 1);
+              rows.splice(targetIndex, 0, sourceRow);
               rows.forEach((row, index) => {
                 row.manualOrder = index;
               });
