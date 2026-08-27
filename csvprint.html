@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>一键排版打印</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { background: #eef1f5; }
+      .sheet { background: #fff; }
+      .answer-cell { min-width: 10em; height: 2.2em; }
+      table.pt { border-collapse: collapse; width: 100%; }
+      table.pt th, table.pt td { border: 1px solid #64748b; padding: 5px 10px; font-size: 14px; }
+      table.pt th { background: #f1f5f9; text-align: left; }
+      table.pt td.center { text-align: center; }
+      .block h3 { border-left: 4px solid #334155; padding-left: 8px; margin: 14px 0 6px; font-size: 15px; }
+      @media print {
+        .no-print { display: none !important; }
+        body { background: #fff; }
+        main { padding: 0 !important; max-width: none !important; }
+        .sheet { box-shadow: none !important; border: none !important; margin: 0 !important; padding: 0 !important; border-radius: 0 !important; page-break-after: always; }
+        .sheet:last-child { page-break-after: auto; }
+        @page { margin: 14mm; }
+      }
+    </style>
+  </head>
+  <body class="min-h-screen text-slate-800">
+    <header class="no-print sticky top-0 z-10 bg-white border-b border-slate-200 px-4 py-3 space-y-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <h1 class="text-base font-semibold mr-2">📄 排版打印</h1>
+        <button id="btnPrint" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">🖨️ 打印 / 导出 PDF</button>
+        <button id="btnCopyRef" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">📋 复制参考单</button>
+        <button id="btnCopyDict" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">📋 复制默写纸</button>
+        <button id="btnSaveCsv" type="button" class="px-3 py-1.5 text-sm rounded border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">💾 存 CSV</button>
+        <a href="/dashboard.html" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">返回汇总</a>
+        <span id="status" class="text-xs text-slate-500" role="status" aria-live="polite">准备加载</span>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 text-sm">
+        <label class="flex items-center gap-1">单元大标题
+          <input id="titleInput" type="text" class="border border-slate-300 rounded px-2 py-1 w-56" placeholder="G5 Unit 1" />
+        </label>
+        <label class="flex items-center gap-1">页码分组（如 8-10, 11-13）
+          <input id="groupInput" type="text" class="border border-slate-300 rounded px-2 py-1 w-72" placeholder="留空则合并为一页" />
+        </label>
+        <button id="btnRender" type="button" class="px-3 py-1.5 text-sm rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100">⚡ 重新排版</button>
+      </div>
+    </header>
+
+    <main class="max-w-[900px] mx-auto p-4 space-y-6">
+      <div id="notice" class="hidden text-sm rounded border px-3 py-2"></div>
+      <div id="sheets" class="space-y-6"></div>
+    </main>
+
+    <script>
+      const TYPE_ORDER = ['core_word', 'ext_word', 'core_phrase', 'ext_phrase', 'core_sentence', 'ext_sentence'];
+      const TYPE_LABEL = {
+        core_word: '核心单词',
+        ext_word: '*拓展单词',
+        core_phrase: '核心词组',
+        ext_phrase: '*拓展词组',
+        core_sentence: '核心句',
+        ext_sentence: '*拓展句'
+      };
+
+      const sheetsEl = document.getElementById('sheets');
+      const noticeEl = document.getElementById('notice');
+      const statusEl = document.getElementById('status');
+      const titleInput = document.getElementById('titleInput');
+      const groupInput = document.getElementById('groupInput');
+
+      let share = null;
+      let rows = [];
+
+      function qs(name) {
+        return new URLSearchParams(window.location.search).get(name);
+      }
+
+      function setStatus(message) {
+        statusEl.textContent = message || '';
+      }
+
+      function showNotice(message, isError) {
+        if (!message) {
+          noticeEl.classList.add('hidden');
+          noticeEl.textContent = '';
+          return;
+        }
+        noticeEl.textContent = message;
+        noticeEl.className = 'text-sm rounded border px-3 py-2 ' +
+          (isError ? 'border-red-300 bg-red-50 text-red-700' : 'border-amber-300 bg-amber-50 text-amber-800');
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function typeIndex(pen) {
+        const i = TYPE_ORDER.indexOf(String(pen || ''));
+        return i >= 0 ? i : 99;
+      }
+
+      async function load() {
+        const key = qs('key');
+        if (!key) {
+          showNotice('缺少 key 参数：请从汇总页点击「一键导出排版」进入本页。', true);
+          setStatus('');
+          return;
+        }
+        setStatus('正在加载...');
+        try {
+          const response = await fetch('/api/share-csv?key=' + encodeURIComponent(key) + '&format=json', { cache: 'no-store' });
+          const payload = await response.json();
+          if (!response.ok || !payload?.ok) {
+            throw new Error(payload?.error || 'HTTP ' + response.status);
+          }
+          share = payload;
+          rows = Array.isArray(payload.annotations) ? payload.annotations : [];
+          if (!titleInput.value) titleInput.value = qs('title') || payload.title || ('Unit ' + payload.unit);
+          if (!groupInput.value) groupInput.value = defaultGroups(rows);
+          setStatus('已加载 ' + rows.length + ' 条（Unit ' + payload.unit + '）');
+          showNotice('');
+          render();
+        } catch (error) {
+          setStatus('');
+          showNotice('加载失败：' + String(error?.message || error), true);
+        }
+      }
+
+      function uniquePages(rs) {
+        return [...new Set(rs.map((r) => Number(r.pageNum)).filter((n) => n > 0))].sort((a, b) => a - b);
+      }
+
+      function defaultGroups(rs) {
+        const pages = uniquePages(rs);
+        if (!pages.length) return '';
+        const runs = [];
+        let start = pages[0];
+        let prev = pages[0];
+        for (let i = 1; i < pages.length; i += 1) {
+          if (pages[i] === prev + 1) {
+            prev = pages[i];
+          } else {
+            runs.push([start, prev]);
+            start = prev = pages[i];
+          }
+        }
+        runs.push([start, prev]);
+        return runs.map(([a, b]) => (a === b ? String(a) : a + '-' + b)).join(', ');
+      }
+
+      function parseGroups(spec, rs) {
+        const text = String(spec || '').trim();
+        if (!text) {
+          const pages = uniquePages(rs);
+          return pages.length ? [pages] : [];
+        }
+        return text
+          .split(/[,，;；\s]+/)
+          .map((token) => token.trim())
+          .filter(Boolean)
+          .map((token) => {
+            const range = token.match(/^(\d+)\s*[-~～]\s*(\d+)$/);
+            if (range) return [Number(range[1]), Number(range[2])];
+            const single = Number(token);
+            return Number.isFinite(single) ? [single, single] : null;
+          })
+          .filter(Boolean);
+      }
+
+      function rowsInGroup(rs, group) {
+        const [a, b] = group;
+        return rs
+          .filter((r) => {
+            const p = Number(r.pageNum);
+            return p >= a && p <= b;
+          })
+          .sort((x, y) => {
+            const px = Number(x.pageNum) || 0;
+            const py = Number(y.pageNum) || 0;
+            if (px !== py) return px - py;
+            const tx = typeIndex(x.pen);
+            const ty = typeIndex(y.pen);
+            if (tx !== ty) return tx - ty;
+            const mx = Number.isFinite(Number(x.manualOrder)) ? Number(x.manualOrder) : Number.MAX_SAFE_INTEGER;
+            const my = Number.isFinite(Number(y.manualOrder)) ? Number(y.manualOrder) : Number.MAX_SAFE_INTEGER;
+            if (mx !== my) return mx - my;
+            return Number(x.createdAt || 0) - Number(y.createdAt || 0);
+          });
+      }
+
+      function groupByType(list) {
+        const map = new Map();
+        for (const type of TYPE_ORDER) {
+          const items = list.filter((r) => String(r.pen || '') === type);
+          if (items.length) map.set(type, items);
+        }
+        return map;
+      }
+
+      function rangeLabel(group) {
+        const [a, b] = group;
+        return a === b ? '第' + a + '页' : '第' + a + '-' + b + '页';
+      }
+
+      function buildSheet({ heading, byType, columns, rowCells }) {
+        const sheet = document.createElement('section');
+        sheet.className = 'sheet rounded-lg shadow border border-slate-200 p-6';
+        let html = '<h2 class="text-lg font-bold text-center mb-2">' + escapeHtml(heading) + '</h2>';
+        for (const [type, items] of byType.entries()) {
+          html += '<div class="block" style="break-inside: avoid;">';
+          html += '<h3>' + escapeHtml(TYPE_LABEL[type] || type) + '</h3>';
+          html += '<table class="pt"><thead><tr>';
+          for (const col of columns) html += '<th>' + escapeHtml(col) + '</th>';
+          html += '</tr></thead><tbody>';
+          items.forEach((r, i) => {
+            html += '<tr>' + rowCells(i + 1, r) + '</tr>';
+          });
+          html += '</tbody></table></div>';
+        }
+        sheet.innerHTML = html;
+        return sheet;
+      }
+
+      function render() {
+        const title = titleInput.value.trim() || 'Unit';
+        const groups = parseGroups(groupInput.value, rows);
+        sheetsEl.innerHTML = '';
+
+        if (!rows.length) {
+          showNotice('当前分享没有标注数据。', true);
+          return;
+        }
+        if (!groups.length) {
+          showNotice('分组规则没有解析出任何页码，请检查输入（如 8-10, 11-13）。', true);
+          return;
+        }
+        showNotice('');
+
+        let rendered = 0;
+        for (const group of groups) {
+          const list = rowsInGroup(rows, group);
+          if (!list.length) continue;
+          rendered += 1;
+          const byType = groupByType(list);
+          const label = rangeLabel(group);
+
+          const refSheet = buildSheet({
+            heading: title + '（' + label + '）参考单',
+            byType,
+            columns: ['序号', '英文', '中文'],
+            rowCells: (idx, r) =>
+              '<td class="center">' + idx + '</td>' +
+              '<td>' + escapeHtml(r.text || '') + '</td>' +
+              '<td>' + escapeHtml(r.zh || '') + '</td>'
+          });
+
+          const dictSheet = buildSheet({
+            heading: title + '（' + label + '）默写纸',
+            byType,
+            columns: ['序号', '中文提示', '英文默写'],
+            rowCells: (idx, r) =>
+              '<td class="center">' + idx + '</td>' +
+              '<td>' + escapeHtml(r.zh || '') + '</td>' +
+              '<td class="answer-cell"></td>'
+          });
+
+          sheetsEl.appendChild(refSheet);
+          sheetsEl.appendChild(dictSheet);
+        }
+        setStatus('排版完成：' + rendered + ' 组，共 ' + sheetsEl.childElementCount + ' 页。');
+      }
+
+      function buildCopyText(kind) {
+        const title = titleInput.value.trim() || 'Unit';
+        const groups = parseGroups(groupInput.value, rows);
+        const lines = [];
+        for (const group of groups) {
+          const list = rowsInGroup(rows, group);
+          if (!list.length) continue;
+          const byType = groupByType(list);
+          lines.push('【' + (kind === 'ref' ? '参考单' : '默写纸') + '】' + title + '（' + rangeLabel(group) + '）');
+          for (const [type, items] of byType.entries()) {
+            lines.push('■ ' + (TYPE_LABEL[type] || type));
+            items.forEach((r, i) => {
+              const n = i + 1;
+              if (kind === 'ref') {
+                lines.push(n + '. ' + (r.text || '') + '　' + (r.zh || ''));
+              } else {
+                lines.push(n + '. ' + (r.zh || '') + '　____________');
+              }
+            });
+          }
+          lines.push('');
+        }
+        return lines.join('\n');
+      }
+
+      async function copyText(text, label) {
+        try {
+          await navigator.clipboard.writeText(text);
+          setStatus(label + '已复制到剪贴板。');
+        } catch {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          setStatus(label + '已复制到剪贴板。');
+        }
+      }
+
+      function saveCsv() {
+        if (!share?.csvText) {
+          setStatus('没有可保存的 CSV。');
+          return;
+        }
+        const csvText = '\uFEFF' + share.csvText.replace(/^\uFEFF/, '');
+        const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        const rawName = (titleInput.value.trim() || 'export').replace(/[\\/:*?"<>|]/g, '_');
+        link.href = url;
+        link.download = rawName + '.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        setStatus('CSV 已保存。');
+      }
+
+      document.getElementById('btnRender').addEventListener('click', render);
+      titleInput.addEventListener('change', render);
+      groupInput.addEventListener('change', render);
+      document.getElementById('btnPrint').addEventListener('click', () => window.print());
+      document.getElementById('btnCopyRef').addEventListener('click', () => copyText(buildCopyText('ref'), '参考单'));
+      document.getElementById('btnCopyDict').addEventListener('click', () => copyText(buildCopyText('dict'), '默写纸'));
+      document.getElementById('btnSaveCsv').addEventListener('click', saveCsv);
+
+      load();
+
+    </script>
+  </body>
+</html>

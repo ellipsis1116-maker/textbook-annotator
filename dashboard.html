@@ -39,8 +39,7 @@
           <label class="text-sm text-slate-600" for="unitSelect">查看</label>
           <select id="unitSelect" class="border border-slate-300 rounded px-2 py-1.5 text-sm bg-white"></select>
           <button id="refreshBtn" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">刷新</button>
-          <a id="downloadBtn" class="px-3 py-1.5 text-sm rounded border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" href="#">下载 CSV</a>
-          <button id="printBtn" type="button" class="px-3 py-1.5 text-sm rounded border border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100">📄 一键直达排版</button>
+          <button id="printBtn" type="button" class="px-3 py-1.5 text-sm rounded border border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100">📤 一键导出排版</button>
           <span id="status" class="text-xs text-slate-500 min-w-[7rem]" role="status" aria-live="polite">准备加载</span>
         </div>
         <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
@@ -85,12 +84,11 @@
       const detailTitleEl = document.getElementById('detailTitle');
       const detailTotalEl = document.getElementById('detailTotal');
       const detailRowsEl = document.getElementById('detailRows');
-      const downloadBtn = document.getElementById('downloadBtn');
       const printBtn = document.getElementById('printBtn');
       let unitPayloads = new Map();
 
-      // 外部排版站点：跨站一键跳转并携带短 key（排版站用 key 调取 CSV）
-      const CSV_PRINT_SITE_BASE = 'https://csvprint.pages.dev/';
+      // 内置排版页（同源 /csvprint.html）：点击 = 保存当前单元 CSV 到 KV（短 key），排版页用 key 自动加载
+      const CSV_PRINT_SITE_BASE = '/csvprint.html';
 
       function openCsvPrintSiteByKey(key, title) {
         const encodedKey = encodeURIComponent(key || '');
@@ -181,7 +179,6 @@
         const rows = sortRows(getRows(payload));
         detailTitleEl.textContent = `Unit ${unit} 明细`;
         detailTotalEl.textContent = `${rows.length} 条`;
-        downloadBtn.href = `/api/export-csv?unit=${encodeURIComponent(String(unit))}`;
         if (!rows.length) {
           detailRowsEl.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">暂无标注</td></tr>';
           return;

@@ -39,7 +39,7 @@ export async function onRequestGet(context) {
   const csvText = payload?.csvText || annotationsToCsvText(payload?.annotations || []);
   const title = String(payload?.title || '');
 
-  // 供排版站跨域读取时可获取标题
+  // 供排版页（同源 /csvprint.html）或外部站读取
   const format = url.searchParams.get('format');
   if (format === 'json') {
     return json({
@@ -48,6 +48,7 @@ export async function onRequestGet(context) {
       unit: Number(payload?.unit) || 0,
       title,
       total: Array.isArray(payload?.annotations) ? payload.annotations.length : 0,
+      annotations: Array.isArray(payload?.annotations) ? payload.annotations : [],
       csvText,
       createdAt: Number(payload?.createdAt) || null
     });

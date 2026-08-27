@@ -22,8 +22,11 @@
 - 前端会优先通过 Pages Functions 读取/写入 KV：`/api/annotations?unit=N`
 - 导出接口：
   - `GET /api/export-csv?unit=N`：从 KV 读取 JSON 标注并实时转换为 CSV 下载。
+  - `POST /api/create-share`（body: `{unit}`）：把当前单元 CSV 持久写入 KV 短 key（`share:csv:{key}`），返回 key。
+  - `GET /api/share-csv?key=xxx`：按 key 取 CSV（`&format=json` 额外返回标题与标注数组，供 `/csvprint.html` 自动加载）。
 - 页面保存成功后将数据写入 Cloudflare KV。
-- `/dashboard.html` 提供公开的单元选择、刷新统计和 CSV 下载入口。
+- `/dashboard.html` 公开汇总：仅保留「📤 一键导出排版」按钮。
+- `/csvprint.html` 内置排版页：通过 `?key=` 自动加载刚才导出的 CSV，支持页码分组、复制参考单/默写纸、打印导出 PDF、存 CSV。
 
 ### 1) 绑定 KV Namespace
 
