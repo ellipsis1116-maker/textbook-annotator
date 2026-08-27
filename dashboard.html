@@ -40,6 +40,7 @@
           <select id="unitSelect" class="border border-slate-300 rounded px-2 py-1.5 text-sm bg-white"></select>
           <button id="refreshBtn" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">刷新</button>
           <a id="downloadBtn" class="px-3 py-1.5 text-sm rounded border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" href="#">下载 CSV</a>
+          <button id="printBtn" type="button" class="px-3 py-1.5 text-sm rounded border border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100">📄 一键直达排版</button>
           <span id="status" class="text-xs text-slate-500 min-w-[7rem]" role="status" aria-live="polite">准备加载</span>
         </div>
         <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
@@ -85,7 +86,51 @@
       const detailTotalEl = document.getElementById('detailTotal');
       const detailRowsEl = document.getElementById('detailRows');
       const downloadBtn = document.getElementById('downloadBtn');
+      const printBtn = document.getElementById('printBtn');
       let unitPayloads = new Map();
+
+      // 外部排版站点：跨站一键跳转并携带 CSV 数据
+      const CSV_PRINT_SITE_BASE = 'https://csvprint.pages.dev/';
+      const CSV_PRINT_GRADE = 'G5';
+      // CSV 经 URL 传递时建议控制长度，超出时提示改用“下载 CSV”
+      const CSV_PRINT_MAX_CHARS = 15000;
+
+      function openCsvPrintSite(grade, unitName, csvContent) {
+        // 1. 规范化标题，例如 "G5 Unit 1"
+        const title = `${grade.toUpperCase()} ${unitName}`;
+
+        // 2. 对 CSV 内容和标题进行 URL 编码；顺便去掉 BOM，避免接收端把 \uFEFF 当作首个字符
+        const cleanCsv = String(csvContent || '').replace(/^\uFEFF/, '');
+        const encodedCsv = encodeURIComponent(cleanCsv);
+        const encodedTitle = encodeURIComponent(title);
+
+        if (encodedCsv.length > CSV_PRINT_MAX_CHARS) {
+          statusEl.textContent = `CSV 内容过长（编码后 ${encodedCsv.length} 字符），建议先使用“下载 CSV”。`;
+          return;
+        }
+
+        // 3. 拼装目标网址并打开新标签页
+        const targetUrl = `${CSV_PRINT_SITE_BASE}?csv=${encodedCsv}&title=${encodedTitle}`;
+        window.open(targetUrl, '_blank');
+        statusEl.textContent = `已跳转：${title}`;
+      }
+
+      async function handlePrintClick() {
+        const unit = Number(unitSelect.value || '1');
+        statusEl.textContent = '正在获取 CSV...';
+        try {
+          const response = await fetch(`/api/export-csv?unit=${encodeURIComponent(String(unit))}`, {
+            cache: 'no-store'
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const csvContent = await response.text();
+          openCsvPrintSite(CSV_PRINT_GRADE, `Unit ${unit}`, csvContent);
+        } catch (error) {
+          statusEl.textContent = `获取 CSV 失败：${String(error?.message || error)}`;
+        }
+      }
 
       function escapeHtml(value) {
         return String(value ?? '')
@@ -191,6 +236,7 @@
       unitSelect.value = '1';
       unitSelect.addEventListener('change', () => renderDetails(Number(unitSelect.value)));
       document.getElementById('refreshBtn').addEventListener('click', load);
+      document.getElementById('printBtn').addEventListener('click', handlePrintClick);
       load();
     </script>
   </body>
