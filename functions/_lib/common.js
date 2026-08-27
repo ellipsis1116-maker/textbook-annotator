@@ -6,9 +6,45 @@ export const UNIT_CSV_COLUMNS = [
   '英文',
   '中文'
 ];
+export const CSV_SHARE_KEY_PREFIX = 'share:csv:';
+export const CSV_PRINT_GRADE = 'G5';
+
+export function csvShareKey(key) {
+  return `${CSV_SHARE_KEY_PREFIX}${key}`;
+}
+
+export function newShareKey() {
+  const arr = new Uint8Array(8);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(arr);
+  } else {
+    for (let i = 0; i < arr.length; i += 1) arr[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(arr)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+export function unitCsvTitle(unit) {
+  return `${CSV_PRINT_GRADE.toUpperCase()} Unit ${Number(unit)}`;
+}
+
+export function corsHeaders(extra = {}) {
+  const headers = new Headers(extra);
+  if (!headers.has('Access-Control-Allow-Origin')) {
+    headers.set('Access-Control-Allow-Origin', '*');
+  }
+  if (!headers.has('Access-Control-Allow-Methods')) {
+    headers.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  }
+  if (!headers.has('Access-Control-Allow-Headers')) {
+    headers.set('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  return headers;
+}
 
 export function json(data, init = {}) {
-  const headers = new Headers(init.headers || {});
+  const headers = corsHeaders(init.headers || {});
   if (!headers.has('content-type')) {
     headers.set('content-type', 'application/json; charset=utf-8');
   }
