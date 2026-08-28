@@ -6,21 +6,66 @@
     <title>一键排版打印</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-      body { background: #eef1f5; }
-      .sheet { background: #fff; }
-      .answer-cell { min-width: 10em; height: 2.2em; }
-      table.pt { border-collapse: collapse; width: 100%; }
-      table.pt th, table.pt td { border: 1px solid #64748b; padding: 5px 10px; font-size: 14px; }
-      table.pt th { background: #f1f5f9; text-align: left; }
-      table.pt td.center { text-align: center; }
-      .block h3 { border-left: 4px solid #334155; padding-left: 8px; margin: 14px 0 6px; font-size: 15px; }
+      body { background: #f6f7f9; }
+      .sheet {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05);
+        padding: 24px;
+      }
+      .sheet-title { font-size: 22px; line-height: 1.25; font-weight: 700; text-align: center; letter-spacing: 0.02em; margin-bottom: 8px; }
+      .sheet-meta { font-size: 12px; color: #64748b; text-align: center; margin-bottom: 14px; }
+
+      .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+      .panel { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 14px 10px; background: #fff; }
+      .panel-title { font-size: 14px; font-weight: 600; color: #334155; margin-bottom: 8px; letter-spacing: 0.02em; }
+
+      .block { break-inside: avoid; margin-bottom: 10px; }
+      .block h3 {
+        margin: 12px 0 6px;
+        font-size: 14px;
+        font-weight: 700;
+        color: #0f172a;
+      }
+
+      table.pt { border-collapse: collapse; width: 100%; table-layout: fixed; }
+      table.pt th, table.pt td {
+        border-bottom: 1px solid #e2e8f0;
+        padding: 7px 8px;
+        font-size: 13px;
+        vertical-align: top;
+      }
+      table.pt th {
+        background: #f8fafc;
+        color: #334155;
+        text-align: left;
+        font-weight: 600;
+      }
+      table.pt td.center { text-align: center; white-space: nowrap; width: 4.5em; }
+      .answer-cell { min-width: 9em; height: 1.9em; border-bottom: 1px solid #cbd5e1; }
+      .ext-mark { color: #2563eb; font-weight: 600; }
+
+      @media (max-width: 980px) {
+        .duo { grid-template-columns: 1fr; }
+      }
+
       @media print {
         .no-print { display: none !important; }
         body { background: #fff; }
         main { padding: 0 !important; max-width: none !important; }
-        .sheet { box-shadow: none !important; border: none !important; margin: 0 !important; padding: 0 !important; border-radius: 0 !important; page-break-after: always; }
+        .sheet {
+          box-shadow: none !important;
+          border: none !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          border-radius: 0 !important;
+          page-break-after: always;
+        }
         .sheet:last-child { page-break-after: auto; }
-        @page { margin: 14mm; }
+        .duo { grid-template-columns: 1fr 1fr !important; gap: 10mm; }
+        .panel { border-color: #e2e8f0; }
+        @page { margin: 12mm; }
       }
     </style>
   </head>
@@ -291,37 +336,97 @@
         });
       }
 
-      function groupByType(list) {
-        const map = new Map();
-        for (const type of TYPE_ORDER) {
-          const items = list.filter((r) => String(r.pen || '') === type);
-          if (items.length) map.set(type, items);
-        }
-        return map;
-      }
+      const CATEGORY_CONFIG = [
+        { title: 'I. Words', core: 'core_word', ext: 'ext_word' },
+        { title: 'II. Phrases', core: 'core_phrase', ext: 'ext_phrase' },
+        { title: 'III. Sentences', core: 'core_sentence', ext: 'ext_sentence' }
+      ];
 
       function rangeLabel(group) {
-        if (!group) return '全部页码';
+        if (!group) return 'All Pages';
         const [a, b] = group;
-        return a === b ? '第' + a + '页' : '第' + a + '-' + b + '页';
+        return a === b ? 'Page ' + a : 'Pages ' + a + '-' + b;
       }
 
-      function buildSheet({ heading, byType, columns, rowCells }) {
-        const sheet = document.createElement('section');
-        sheet.className = 'sheet rounded-lg shadow border border-slate-200 p-6';
-        let html = '<h2 class="text-lg font-bold text-center mb-2">' + escapeHtml(heading) + '</h2>';
-        for (const [type, items] of byType.entries()) {
-          html += '<div class="block" style="break-inside: avoid;">';
-          html += '<h3>' + escapeHtml(TYPE_LABEL[type] || type) + '</h3>';
+      function buildCategoryItems(list, coreType, extType) {
+        const coreItems = list.filter((r) => String(r.pen || '') === coreType);
+        const extItems = list.filter((r) => String(r.pen || '') === extType);
+        let seq = 0;
+        const out = [];
+
+        coreItems.forEach((r) => {
+          seq += 1;
+          out.push({ row: r, no: String(seq), isExt: false });
+        });
+        extItems.forEach((r) => {
+          seq += 1;
+          out.push({ row: r, no: '*' + String(seq), isExt: true });
+        });
+
+        return out;
+      }
+
+      function buildCategoryGroups(list) {
+        return CATEGORY_CONFIG
+          .map((cfg) => ({
+            title: cfg.title,
+            items: buildCategoryItems(list, cfg.core, cfg.ext)
+          }))
+          .filter((g) => g.items.length > 0);
+      }
+
+      function buildPanelHtml(kind, groups) {
+        const panelTitle = kind === 'ref' ? 'Reference List' : 'Dictation Sheet';
+        let html = '<section class="panel"><h3 class="panel-title">' + escapeHtml(panelTitle) + '</h3>';
+
+        for (const group of groups) {
+          html += '<div class="block">';
+          html += '<h3>' + escapeHtml(group.title) + '</h3>';
           html += '<table class="pt"><thead><tr>';
-          for (const col of columns) html += '<th>' + escapeHtml(col) + '</th>';
+          if (kind === 'ref') {
+            html += '<th style="width:4.5em;">No.</th><th>English</th><th>Chinese</th>';
+          } else {
+            html += '<th style="width:4.5em;">No.</th><th>Chinese Prompt</th><th>English</th>';
+          }
           html += '</tr></thead><tbody>';
-          items.forEach((r, i) => {
-            html += '<tr>' + rowCells(i + 1, r) + '</tr>';
+
+          group.items.forEach((item) => {
+            const numClass = item.isExt ? 'center ext-mark' : 'center';
+            if (kind === 'ref') {
+              html += '<tr>' +
+                '<td class="' + numClass + '">' + escapeHtml(item.no) + '</td>' +
+                '<td>' + escapeHtml(item.row.text || '') + '</td>' +
+                '<td>' + escapeHtml(item.row.zh || '') + '</td>' +
+                '</tr>';
+            } else {
+              html += '<tr>' +
+                '<td class="' + numClass + '">' + escapeHtml(item.no) + '</td>' +
+                '<td>' + escapeHtml(item.row.zh || '') + '</td>' +
+                '<td class="answer-cell"></td>' +
+                '</tr>';
+            }
           });
+
           html += '</tbody></table></div>';
         }
-        sheet.innerHTML = html;
+
+        html += '</section>';
+        return html;
+      }
+
+      function buildSpreadSheet({ title, group, groups }) {
+        const sheet = document.createElement('section');
+        sheet.className = 'sheet';
+
+        const meta = '<div class="sheet-meta">' + escapeHtml(rangeLabel(group)) + '</div>';
+        sheet.innerHTML =
+          '<h2 class="sheet-title">' + escapeHtml(title) + '</h2>' +
+          meta +
+          '<div class="duo">' +
+          buildPanelHtml('ref', groups) +
+          buildPanelHtml('dict', groups) +
+          '</div>';
+
         return sheet;
       }
 
@@ -344,32 +449,10 @@
         for (const group of groups) {
           const list = rowsInGroup(rows, group);
           if (!list.length) continue;
+          const catGroups = buildCategoryGroups(list);
+          if (!catGroups.length) continue;
           rendered += 1;
-          const byType = groupByType(list);
-          const label = rangeLabel(group);
-
-          const refSheet = buildSheet({
-            heading: title + '（' + label + '）参考单',
-            byType,
-            columns: ['序号', '英文', '中文'],
-            rowCells: (idx, r) =>
-              '<td class="center">' + idx + '</td>' +
-              '<td>' + escapeHtml(r.text || '') + '</td>' +
-              '<td>' + escapeHtml(r.zh || '') + '</td>'
-          });
-
-          const dictSheet = buildSheet({
-            heading: title + '（' + label + '）默写纸',
-            byType,
-            columns: ['序号', '中文提示', '英文默写'],
-            rowCells: (idx, r) =>
-              '<td class="center">' + idx + '</td>' +
-              '<td>' + escapeHtml(r.zh || '') + '</td>' +
-              '<td class="answer-cell"></td>'
-          });
-
-          sheetsEl.appendChild(refSheet);
-          sheetsEl.appendChild(dictSheet);
+          sheetsEl.appendChild(buildSpreadSheet({ title, group, groups: catGroups }));
         }
         setStatus('排版完成：' + rendered + ' 组，共 ' + sheetsEl.childElementCount + ' 页。');
       }
@@ -378,24 +461,29 @@
         const title = titleInput.value.trim() || 'Unit';
         const groups = parseGroups(groupInput.value);
         const lines = [];
+
         for (const group of groups) {
           const list = rowsInGroup(rows, group);
           if (!list.length) continue;
-          const byType = groupByType(list);
-          lines.push('【' + (kind === 'ref' ? '参考单' : '默写纸') + '】' + title + '（' + rangeLabel(group) + '）');
-          for (const [type, items] of byType.entries()) {
-            lines.push('■ ' + (TYPE_LABEL[type] || type));
-            items.forEach((r, i) => {
-              const n = i + 1;
+          const catGroups = buildCategoryGroups(list);
+          if (!catGroups.length) continue;
+
+          lines.push('【' + (kind === 'ref' ? 'Reference List' : 'Dictation Sheet') + '】' + title);
+          lines.push('(' + rangeLabel(group) + ')');
+
+          for (const cat of catGroups) {
+            lines.push('■ ' + cat.title);
+            cat.items.forEach((item) => {
               if (kind === 'ref') {
-                lines.push(n + '. ' + (r.text || '') + '　' + (r.zh || ''));
+                lines.push(item.no + '. ' + (item.row.text || '') + '　' + (item.row.zh || ''));
               } else {
-                lines.push(n + '. ' + (r.zh || '') + '　____________');
+                lines.push(item.no + '. ' + (item.row.zh || '') + '　____________');
               }
             });
           }
           lines.push('');
         }
+
         return lines.join('\n');
       }
 
