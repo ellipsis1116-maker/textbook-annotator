@@ -104,15 +104,125 @@
         return i >= 0 ? i : 99;
       }
 
+      function parseCsvTable(csvText) {
+        const text = String(csvText || '').replace(/^\uFEFF/, '');
+        const out = [];
+        let row = [];
+        let field = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < text.length; i += 1) {
+          const ch = text[i];
+          if (inQuotes) {
+            if (ch === '"') {
+              if (text[i + 1] === '"') {
+                field += '"';
+                i += 1;
+              } else {
+                inQuotes = false;
+              }
+            } else {
+              field += ch;
+            }
+            continue;
+          }
+
+          if (ch === '"') {
+            inQuotes = true;
+          } else if (ch === ',') {
+            row.push(field);
+            field = '';
+          } else if (ch === '\n') {
+            row.push(field);
+            out.push(row);
+            row = [];
+            field = '';
+          } else if (ch !== '\r') {
+            field += ch;
+          }
+        }
+        row.push(field);
+        out.push(row);
+
+        return out.filter((r) => r.some((cell) => String(cell || '').trim() !== ''));
+      }
+
+      function normalizeType(rawType) {
+        const t = String(rawType || '').trim();
+        if (!t) return '';
+        if (TYPE_ORDER.includes(t)) return t;
+
+        const byLabel = Object.entries(TYPE_LABEL).find(([, label]) => label === t);
+        if (byLabel) return byLabel[0];
+
+        if (t.includes('核心') && t.includes('单词')) return 'core_word';
+        if (t.includes('拓展') && t.includes('单词')) return 'ext_word';
+        if (t.includes('核心') && t.includes('词组')) return 'core_phrase';
+        if (t.includes('拓展') && t.includes('词组')) return 'ext_phrase';
+        if (t.includes('核心') && t.includes('句')) return 'core_sentence';
+        if (t.includes('拓展') && t.includes('句')) return 'ext_sentence';
+        return t;
+      }
+
+      function parseRowsFromCsvText(csvText) {
+        const table = parseCsvTable(csvText);
+        if (!table.length) return [];
+
+        const headerRow = table[0].map((h) => String(h || '').trim());
+        const headerMap = new Map(headerRow.map((h, i) => [h, i]));
+        const hasHeader = headerMap.has('类型') || headerMap.has('英文') || headerMap.has('中文');
+        const dataRows = hasHeader ? table.slice(1) : table;
+
+        const idxType = hasHeader ? (headerMap.get('类型') ?? headerMap.get('type')) : 0;
+        const idxOrder = hasHeader ? (headerMap.get('序号') ?? headerMap.get('编号')) : 1;
+        const idxText = hasHeader ? (headerMap.get('英文') ?? headerMap.get('英文原文') ?? headerMap.get('text')) : 2;
+        const idxZh = hasHeader ? (headerMap.get('中文') ?? headerMap.get('中文翻译') ?? headerMap.get('zh')) : 3;
+        const idxPage = hasHeader ? (headerMap.get('页码') ?? headerMap.get('pageNum') ?? headerMap.get('page')) : -1;
+
+        return dataRows.map((r, i) => {
+          const text = String(r[idxText] ?? '').trim();
+          const zh = String(r[idxZh] ?? '').trim();
+          const rawType = String(r[idxType] ?? '').trim();
+          const pen = normalizeType(rawType);
+          const manualOrder = Number(r[idxOrder]);
+          const pageNum = idxPage >= 0 ? Number(r[idxPage]) : NaN;
+          return {
+            pen,
+            text,
+            zh,
+            manualOrder: Number.isFinite(manualOrder) ? manualOrder : i + 1,
+            pageNum: Number.isFinite(pageNum) ? pageNum : null,
+            createdAt: i + 1
+          };
+        }).filter((r) => r.text || r.zh || r.pen);
+      }
+
       async function load() {
         const key = qs('key');
-        if (!key) {
-          showNotice('缺少 key 参数：请从汇总页点击「一键导出排版」进入本页。', true);
-          setStatus('');
-          return;
-        }
+        const csvParam = qs('csv');
+        const titleParam = qs('title');
+        const groupsParam = qs('groups');
+
         setStatus('正在加载...');
         try {
+          if (csvParam) {
+            const csvText = String(csvParam || '');
+            share = { csvText, title: titleParam || '' };
+            rows = parseRowsFromCsvText(csvText);
+            if (!titleInput.value) titleInput.value = titleParam || 'Unit';
+            if (!groupInput.value) groupInput.value = groupsParam || '';
+            setStatus('已从 URL 加载 ' + rows.length + ' 条');
+            showNotice('');
+            render();
+            return;
+          }
+
+          if (!key) {
+            showNotice('缺少 key 或 csv 参数：请从汇总页点击「一键导出排版」进入本页。', true);
+            setStatus('');
+            return;
+          }
+
           const response = await fetch('/api/share-csv?key=' + encodeURIComponent(key) + '&format=json', { cache: 'no-store' });
           const payload = await response.json();
           if (!response.ok || !payload?.ok) {
@@ -120,8 +230,8 @@
           }
           share = payload;
           rows = Array.isArray(payload.annotations) ? payload.annotations : [];
-          if (!titleInput.value) titleInput.value = qs('title') || payload.title || ('Unit ' + payload.unit);
-          if (!groupInput.value) groupInput.value = defaultGroups(rows);
+          if (!titleInput.value) titleInput.value = titleParam || payload.title || ('Unit ' + payload.unit);
+          if (!groupInput.value) groupInput.value = groupsParam || '';
           setStatus('已加载 ' + rows.length + ' 条（Unit ' + payload.unit + '）');
           showNotice('');
           render();
@@ -131,66 +241,54 @@
         }
       }
 
-      function uniquePages(rs) {
-        return [...new Set(rs.map((r) => Number(r.pageNum)).filter((n) => n > 0))].sort((a, b) => a - b);
-      }
-
-      function defaultGroups(rs) {
-        const pages = uniquePages(rs);
-        if (!pages.length) return '';
-        const runs = [];
-        let start = pages[0];
-        let prev = pages[0];
-        for (let i = 1; i < pages.length; i += 1) {
-          if (pages[i] === prev + 1) {
-            prev = pages[i];
-          } else {
-            runs.push([start, prev]);
-            start = prev = pages[i];
-          }
-        }
-        runs.push([start, prev]);
-        return runs.map(([a, b]) => (a === b ? String(a) : a + '-' + b)).join(', ');
-      }
-
-      function parseGroups(spec, rs) {
+      function parseGroups(spec) {
         const text = String(spec || '').trim();
+        // 关键修复：分组为空时 = 全量，不做任何页码过滤
         if (!text) {
-          const pages = uniquePages(rs);
-          return pages.length ? [pages] : [];
+          return [null];
         }
-        return text
+
+        const parsed = text
           .split(/[,，;；\s]+/)
           .map((token) => token.trim())
           .filter(Boolean)
           .map((token) => {
             const range = token.match(/^(\d+)\s*[-~～]\s*(\d+)$/);
-            if (range) return [Number(range[1]), Number(range[2])];
+            if (range) {
+              const a = Number(range[1]);
+              const b = Number(range[2]);
+              return [Math.min(a, b), Math.max(a, b)];
+            }
             const single = Number(token);
             return Number.isFinite(single) ? [single, single] : null;
           })
           .filter(Boolean);
+
+        // 输入存在但无法解析时返回空，交给上层提示
+        return parsed;
       }
 
       function rowsInGroup(rs, group) {
-        const [a, b] = group;
-        return rs
-          .filter((r) => {
-            const p = Number(r.pageNum);
-            return p >= a && p <= b;
-          })
-          .sort((x, y) => {
-            const px = Number(x.pageNum) || 0;
-            const py = Number(y.pageNum) || 0;
-            if (px !== py) return px - py;
-            const tx = typeIndex(x.pen);
-            const ty = typeIndex(y.pen);
-            if (tx !== ty) return tx - ty;
-            const mx = Number.isFinite(Number(x.manualOrder)) ? Number(x.manualOrder) : Number.MAX_SAFE_INTEGER;
-            const my = Number.isFinite(Number(y.manualOrder)) ? Number(y.manualOrder) : Number.MAX_SAFE_INTEGER;
-            if (mx !== my) return mx - my;
-            return Number(x.createdAt || 0) - Number(y.createdAt || 0);
-          });
+        const filtered = !group
+          ? rs.slice()
+          : rs.filter((r) => {
+              const [a, b] = group;
+              const p = Number(r.pageNum);
+              return Number.isFinite(p) && p >= a && p <= b;
+            });
+
+        return filtered.sort((x, y) => {
+          const px = Number(x.pageNum) || 0;
+          const py = Number(y.pageNum) || 0;
+          if (px !== py) return px - py;
+          const tx = typeIndex(x.pen);
+          const ty = typeIndex(y.pen);
+          if (tx !== ty) return tx - ty;
+          const mx = Number.isFinite(Number(x.manualOrder)) ? Number(x.manualOrder) : Number.MAX_SAFE_INTEGER;
+          const my = Number.isFinite(Number(y.manualOrder)) ? Number(y.manualOrder) : Number.MAX_SAFE_INTEGER;
+          if (mx !== my) return mx - my;
+          return Number(x.createdAt || 0) - Number(y.createdAt || 0);
+        });
       }
 
       function groupByType(list) {
@@ -203,6 +301,7 @@
       }
 
       function rangeLabel(group) {
+        if (!group) return '全部页码';
         const [a, b] = group;
         return a === b ? '第' + a + '页' : '第' + a + '-' + b + '页';
       }
@@ -228,7 +327,7 @@
 
       function render() {
         const title = titleInput.value.trim() || 'Unit';
-        const groups = parseGroups(groupInput.value, rows);
+        const groups = parseGroups(groupInput.value);
         sheetsEl.innerHTML = '';
 
         if (!rows.length) {
@@ -277,7 +376,7 @@
 
       function buildCopyText(kind) {
         const title = titleInput.value.trim() || 'Unit';
-        const groups = parseGroups(groupInput.value, rows);
+        const groups = parseGroups(groupInput.value);
         const lines = [];
         for (const group of groups) {
           const list = rowsInGroup(rows, group);
