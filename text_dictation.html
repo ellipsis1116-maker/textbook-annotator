@@ -140,6 +140,22 @@
             <option v-for="u in units" :key="u" :value="u">Unit {{ u }}</option>
           </select>
 
+          <div class="inline-flex items-center rounded-lg border border-slate-300 overflow-hidden shrink-0" role="tablist" aria-label="全局当前板块">
+            <button
+              v-for="opt in sectionOptions"
+              :key="`global-${opt.value}`"
+              type="button"
+              class="px-3 py-1.5 text-xs sm:text-sm font-medium border-l border-slate-300 first:border-l-0 transition-colors"
+              :class="currentSection === opt.value ? 'bg-violet-100 text-violet-800' : 'bg-white text-slate-600 hover:bg-slate-50'"
+              role="tab"
+              :aria-selected="currentSection === opt.value ? 'true' : 'false'"
+              :title="`设置新句卡默认板块：${opt.label}`"
+              @click="setCurrentSection(opt.value)"
+            >
+              {{ opt.topLabel || opt.label }}
+            </button>
+          </div>
+
           <span class="text-xs text-slate-600 min-w-0 truncate" role="status" aria-live="polite">
             {{ status }}
           </span>
@@ -229,7 +245,7 @@
                 @input="onRowInput"
               ></textarea>
               <p v-if="isRhymeSection(row.section)" class="mt-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                小诗挖空提示：可在英文中用中括号标记挖空词，例如：A [little] bird is in the [tree].
+                小诗挖空提示：支持英文 [word] 或中文 【word】 标记挖空词。
               </p>
 
               <template v-if="!isRhymeSection(row.section)">
@@ -283,9 +299,9 @@
         const TOKEN_HIT_RATIO = 0.3;
         const DEFAULT_SECTION = 'story_time';
         const SECTION_OPTIONS = [
-          { value: 'story_time', label: 'Story time' },
-          { value: 'cartoon_time', label: 'Cartoon time' },
-          { value: 'rhyme_song', label: 'Rhyme / Song (小诗挖空)' }
+          { value: 'story_time', label: 'Story time', topLabel: 'Story time' },
+          { value: 'cartoon_time', label: 'Cartoon time', topLabel: 'Cartoon time' },
+          { value: 'rhyme_song', label: 'Rhyme / Song', topLabel: '小诗填空 (Rhyme / Song)' }
         ];
         const UNIT_PDF_PATHS = {
           1: '/pdfs/unit1.pdf',
@@ -319,6 +335,7 @@
               sectionOptions: SECTION_OPTIONS,
               grade: 'g5',
               currentUnit: 1,
+              currentSection: DEFAULT_SECTION,
               rows: [],
               status: '正在初始化...',
               isUnitLoading: false,
@@ -361,6 +378,10 @@
             },
             markDirty() {
               this.hasUnsavedChanges = true;
+            },
+            setCurrentSection(value) {
+              this.currentSection = this.normalizeSection(value);
+              this.setStatus(`新句卡默认板块：${this.sectionLabel(this.currentSection)}`);
             },
             onRowInput() {
               this.markDirty();
@@ -755,7 +776,7 @@
               const newRows = sentences.map((sentence, i) => ({
                 id: crypto.randomUUID(),
                 text: sentence,
-                section: DEFAULT_SECTION,
+                section: this.currentSection,
                 zh: '',
                 createdAt: now + i
               }));
