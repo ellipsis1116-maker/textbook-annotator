@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>课文默写排版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { background: #f8fafc; color: #0f172a; }
+      .sheet {
+        background: #fff;
+        border-radius: 16px;
+        padding: 28px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+      }
+      .sheet-title {
+        text-align: center;
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        margin-bottom: 18px;
+      }
+      .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+      .panel-title {
+        font-size: 15px;
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
+      .part-block { break-inside: avoid; margin-bottom: 14px; }
+      .part-title {
+        font-size: 14px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .row-item { margin-bottom: 10px; font-size: 13px; line-height: 1.6; }
+      .row-no {
+        display: inline-block;
+        min-width: 2.6em;
+        color: #475569;
+        font-weight: 600;
+      }
+      .zh-line { color: #334155; }
+      .en-line { color: #0f172a; }
+      .answer-line {
+        margin: 4px 0 0 2.6em;
+        color: #94a3b8;
+        letter-spacing: 0.06em;
+        white-space: pre-wrap;
+      }
+      .poem-line {
+        font-size: 14px;
+        line-height: 1.9;
+        white-space: pre-wrap;
+      }
+      .blank { letter-spacing: 0.06em; }
+      .ref-highlight strong { font-weight: 800; }
+
+      @media (max-width: 980px) {
+        .two-col { grid-template-columns: 1fr; }
+      }
+
+      @media print {
+        .no-print { display: none !important; }
+        body { background: #fff; }
+        main { max-width: none !important; padding: 0 !important; }
+        .sheet {
+          box-shadow: none !important;
+          border-radius: 0 !important;
+          padding: 0 !important;
+        }
+        .two-col { grid-template-columns: 1fr 1fr !important; gap: 10mm; }
+        @page { margin: 12mm; }
+      }
+    </style>
+  </head>
+  <body class="min-h-screen">
+    <header class="no-print sticky top-0 z-10 bg-white border-b border-slate-200 px-4 py-3 space-y-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <h1 class="text-base font-semibold mr-2">📝 课文默写排版</h1>
+        <button id="btnPrint" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">🖨️ 打印 / 导出 PDF</button>
+        <button id="btnCopyRef" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">📋 复制参考单</button>
+        <button id="btnCopyDict" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">📋 复制默写纸</button>
+        <span id="status" class="text-xs text-slate-500" role="status" aria-live="polite">准备加载</span>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 text-sm">
+        <label class="flex items-center gap-1">标题
+          <input id="titleInput" type="text" class="border border-slate-300 rounded px-2 py-1 w-72" placeholder="G5 Unit 1" />
+        </label>
+        <label class="flex items-center gap-2">上传 3 列 CSV
+          <input id="fileInput" type="file" accept=".csv,text/csv" class="text-xs" />
+        </label>
+        <button id="btnRender" type="button" class="px-3 py-1.5 text-sm rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100">⚡ 立即渲染</button>
+      </div>
+    </header>
+
+    <main class="max-w-[960px] mx-auto p-4 space-y-4">
+      <div id="notice" class="hidden text-sm rounded border px-3 py-2"></div>
+      <section id="sheet" class="sheet hidden">
+        <h2 id="sheetTitle" class="sheet-title"></h2>
+        <div class="two-col">
+          <section>
+            <h3 class="panel-title">Reference List（参考单）</h3>
+            <div id="refPanel"></div>
+          </section>
+          <section>
+            <h3 class="panel-title">Dictation Sheet（默写纸）</h3>
+            <div id="dictPanel"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const PARTS = [
+        { key: 'story_time', title: 'Part I. Story time', mode: 'sentence' },
+        { key: 'cartoon_time', title: 'Part II. Cartoon time', mode: 'sentence' },
+        { key: 'rhyme_song', title: 'Part III. Rhyme / Song', mode: 'poem' }
+      ];
+
+      const statusEl = document.getElementById('status');
+      const noticeEl = document.getElementById('notice');
+      const titleInput = document.getElementById('titleInput');
+      const fileInput = document.getElementById('fileInput');
+      const sheetEl = document.getElementById('sheet');
+      const sheetTitleEl = document.getElementById('sheetTitle');
+      const refPanelEl = document.getElementById('refPanel');
+      const dictPanelEl = document.getElementById('dictPanel');
+
+      let rows = [];
+
+      function qs(name) {
+        return new URLSearchParams(window.location.search).get(name);
+      }
+
+      function setStatus(message) {
+        statusEl.textContent = message || '';
+      }
+
+      function showNotice(message, isError = false) {
+        if (!message) {
+          noticeEl.classList.add('hidden');
+          noticeEl.textContent = '';
+          return;
+        }
+        noticeEl.textContent = message;
+        noticeEl.className = 'text-sm rounded border px-3 py-2 ' +
+          (isError ? 'border-red-300 bg-red-50 text-red-700' : 'border-amber-300 bg-amber-50 text-amber-800');
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function parseCsvTable(csvText) {
+        const text = String(csvText || '').replace(/^\uFEFF/, '');
+        const out = [];
+        let row = [];
+        let field = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < text.length; i += 1) {
+          const ch = text[i];
+          if (inQuotes) {
+            if (ch === '"') {
+              if (text[i + 1] === '"') {
+                field += '"';
+                i += 1;
+              } else {
+                inQuotes = false;
+              }
+            } else {
+              field += ch;
+            }
+            continue;
+          }
+
+          if (ch === '"') {
+            inQuotes = true;
+          } else if (ch === ',') {
+            row.push(field);
+            field = '';
+          } else if (ch === '\n') {
+            row.push(field);
+            out.push(row);
+            row = [];
+            field = '';
+          } else if (ch !== '\r') {
+            field += ch;
+          }
+        }
+        row.push(field);
+        out.push(row);
+
+        return out.filter((r) => r.some((cell) => String(cell || '').trim() !== ''));
+      }
+
+      function normalizeHeaderKey(value) {
+        return String(value || '').trim().toLowerCase().replace(/[\s_/]+/g, '');
+      }
+
+      function normalizeSection(value) {
+        const raw = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+        if (!raw) return 'story_time';
+        if (raw === 'story' || raw === 'storytime' || raw === 'story_time') return 'story_time';
+        if (raw === 'cartoon' || raw === 'cartoontime' || raw === 'cartoon_time') return 'cartoon_time';
+        if (raw === 'rhyme' || raw === 'song' || raw === 'rhymesong' || raw === 'rhyme_song') return 'rhyme_song';
+        return 'story_time';
+      }
+
+      function parseDictationCsv(csvText) {
+        const table = parseCsvTable(csvText);
+        if (!table.length) return [];
+
+        const headerRow = table[0].map((h) => String(h || '').trim());
+        const normalizedHeader = headerRow.map((h) => normalizeHeaderKey(h));
+        const headerMap = new Map(normalizedHeader.map((h, i) => [h, i]));
+        const hasHeader =
+          normalizedHeader.includes('板块') ||
+          normalizedHeader.includes('section') ||
+          normalizedHeader.includes('英文原句') ||
+          normalizedHeader.includes('英文') ||
+          normalizedHeader.includes('中文释义') ||
+          normalizedHeader.includes('挖空词') ||
+          normalizedHeader.includes('中文');
+
+        const dataRows = hasHeader ? table.slice(1) : table;
+        const idxSection = hasHeader ? (headerMap.get('板块') ?? headerMap.get('section') ?? 0) : 0;
+        const idxText = hasHeader ? (headerMap.get('英文原句') ?? headerMap.get('英文') ?? 1) : 1;
+        const idxZh = hasHeader ? (headerMap.get('中文释义') ?? headerMap.get('挖空词') ?? headerMap.get('中文') ?? 2) : 2;
+
+        return dataRows.map((row, i) => ({
+          id: i + 1,
+          section: normalizeSection(row[idxSection]),
+          text: String(row[idxText] ?? '').trim(),
+          zh: String(row[idxZh] ?? '').trim()
+        })).filter((row) => row.text || row.zh);
+      }
+
+      function splitPoemLines(text) {
+        return String(text || '')
+          .replace(/\r\n/g, '\n')
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean);
+      }
+
+      function dictPoemLine(text) {
+        return String(text || '').replace(/\[([^\]]+)\]/g, '___________');
+      }
+
+      function refPoemLineHtml(text) {
+        return escapeHtml(String(text || '')).replace(/\[([^\]]+)\]/g, '<u class="ref-highlight"><strong>$1</strong></u>');
+      }
+
+      function getPartRows(partKey) {
+        return rows.filter((row) => row.section === partKey);
+      }
+
+      function buildPanels() {
+        const refHtml = [];
+        const dictHtml = [];
+
+        PARTS.forEach((part) => {
+          const list = getPartRows(part.key);
+          if (!list.length) return;
+
+          refHtml.push('<section class="part-block">');
+          refHtml.push('<h4 class="part-title">' + escapeHtml(part.title) + '</h4>');
+          dictHtml.push('<section class="part-block">');
+          dictHtml.push('<h4 class="part-title">' + escapeHtml(part.title) + '</h4>');
+
+          if (part.mode === 'sentence') {
+            list.forEach((row, idx) => {
+              const no = idx + 1;
+              refHtml.push(
+                '<div class="row-item">' +
+                '<div><span class="row-no">' + no + '.</span><span class="zh-line">' + escapeHtml(row.zh || '') + '</span></div>' +
+                '<div class="en-line" style="margin-left:2.6em;">' + escapeHtml(row.text || '') + '</div>' +
+                '</div>'
+              );
+
+              dictHtml.push(
+                '<div class="row-item">' +
+                '<div><span class="row-no">' + no + '.</span><span class="zh-line">' + escapeHtml(row.zh || '') + '</span></div>' +
+                '<div class="answer-line">____________________________________</div>' +
+                '</div>'
+              );
+            });
+          } else {
+            list.forEach((row) => {
+              const poemLines = splitPoemLines(row.text);
+              refHtml.push('<div class="row-item">');
+              dictHtml.push('<div class="row-item">');
+              poemLines.forEach((line) => {
+                refHtml.push('<div class="poem-line">' + refPoemLineHtml(line) + '</div>');
+                dictHtml.push('<div class="poem-line">' + escapeHtml(dictPoemLine(line)) + '</div>');
+              });
+              refHtml.push('</div>');
+              dictHtml.push('</div>');
+            });
+          }
+
+          refHtml.push('</section>');
+          dictHtml.push('</section>');
+        });
+
+        refPanelEl.innerHTML = refHtml.join('');
+        dictPanelEl.innerHTML = dictHtml.join('');
+      }
+
+      function render() {
+        const title = titleInput.value.trim() || '课文默写';
+        sheetTitleEl.textContent = title;
+
+        if (!rows.length) {
+          sheetEl.classList.add('hidden');
+          showNotice('请先通过 URL 传入 csv 参数，或上传 3 列 CSV（板块,英文原句,中文释义/挖空词）。', true);
+          return;
+        }
+
+        showNotice('');
+        buildPanels();
+        sheetEl.classList.remove('hidden');
+        setStatus('渲染完成：' + rows.length + ' 条。');
+      }
+
+      function buildCopyText(kind) {
+        const out = [];
+        const title = titleInput.value.trim() || '课文默写';
+        out.push('【' + (kind === 'ref' ? 'Reference List' : 'Dictation Sheet') + '】' + title);
+
+        PARTS.forEach((part) => {
+          const list = getPartRows(part.key);
+          if (!list.length) return;
+          out.push('');
+          out.push(part.title);
+
+          if (part.mode === 'sentence') {
+            list.forEach((row, idx) => {
+              const no = idx + 1;
+              if (kind === 'ref') {
+                out.push(no + '. ' + (row.zh || ''));
+                out.push('   ' + (row.text || ''));
+              } else {
+                out.push(no + '. ' + (row.zh || ''));
+                out.push('   ____________________________________');
+              }
+            });
+          } else {
+            list.forEach((row) => {
+              splitPoemLines(row.text).forEach((line) => {
+                if (kind === 'ref') {
+                  out.push(String(line || '').replace(/\[([^\]]+)\]/g, '$1'));
+                } else {
+                  out.push(dictPoemLine(line));
+                }
+              });
+              out.push('');
+            });
+          }
+        });
+
+        return out.join('\n').trim();
+      }
+
+      async function copyText(text, label) {
+        try {
+          await navigator.clipboard.writeText(text);
+          setStatus(label + '已复制到剪贴板。');
+        } catch {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          setStatus(label + '已复制到剪贴板。');
+        }
+      }
+
+      function readFileAsText(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(reader.error || new Error('读取失败'));
+          reader.readAsText(file, 'utf-8');
+        });
+      }
+
+      async function onFileChange(event) {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        setStatus('正在读取 CSV...');
+        try {
+          const csvText = await readFileAsText(file);
+          rows = parseDictationCsv(csvText);
+          render();
+        } catch (error) {
+          showNotice('CSV 解析失败：' + String(error?.message || error), true);
+          setStatus('');
+        }
+      }
+
+      function initFromUrl() {
+        const titleParam = qs('title');
+        const csvParam = qs('csv');
+
+        if (titleParam) titleInput.value = String(titleParam);
+        if (!csvParam) {
+          render();
+          setStatus('等待上传 CSV。');
+          return;
+        }
+
+        setStatus('正在从 URL 加载...');
+        try {
+          rows = parseDictationCsv(String(csvParam));
+          render();
+        } catch (error) {
+          rows = [];
+          showNotice('URL CSV 解析失败：' + String(error?.message || error), true);
+          setStatus('');
+        }
+      }
+
+      document.getElementById('btnPrint').addEventListener('click', () => window.print());
+      document.getElementById('btnRender').addEventListener('click', render);
+      document.getElementById('btnCopyRef').addEventListener('click', () => copyText(buildCopyText('ref'), '参考单'));
+      document.getElementById('btnCopyDict').addEventListener('click', () => copyText(buildCopyText('dict'), '默写纸'));
+      titleInput.addEventListener('change', render);
+      fileInput.addEventListener('change', onFileChange);
+
+      window.addEventListener('DOMContentLoaded', initFromUrl);
+    </script>
+  </body>
+</html>
