@@ -369,23 +369,32 @@
 
             } else {
               /* ── Sentence mode (Story / Cartoon) ── */
+              const zhSafe = row.zh ? escapeHtml(row.zh) : '';
+              const enSafe = escapeHtml(row.text || '');
+
+              /* Reference: 有中文 → 中文(主) + 英文(副)；无中文 → 仅英文 */
+              const refBody = zhSafe
+                ? '<div class="zh-primary">' + zhSafe + '</div>' +
+                  '<div class="en-sub">' + enSafe + '</div>'
+                : '<div class="zh-primary">' + enSafe + '</div>';
+
               refHtml.push(
                 '<div class="row-item">' +
                   '<span class="row-no">' + no + '.</span>' +
-                  '<div class="row-body">' +
-                    '<div class="zh-primary">' + escapeHtml(row.zh || '(暂无中文翻译)') + '</div>' +
-                    '<div class="en-sub">' + escapeHtml(row.text || '') + '</div>' +
-                  '</div>' +
+                  '<div class="row-body">' + refBody + '</div>' +
                 '</div>'
               );
+
+              /* Dictation: 有中文 → 中文提示 + 横线；无中文 → 仅横线 */
+              const dictBody = (zhSafe
+                ? '<div class="zh-primary">' + zhSafe + '</div>'
+                : '') +
+                '<div class="answer-rule"></div>';
 
               dictHtml.push(
                 '<div class="row-item">' +
                   '<span class="row-no">' + no + '.</span>' +
-                  '<div class="row-body">' +
-                    '<div class="zh-primary">' + escapeHtml(row.zh || '(请看中文写英文)') + '</div>' +
-                    '<div class="answer-rule"></div>' +
-                  '</div>' +
+                  '<div class="row-body">' + dictBody + '</div>' +
                 '</div>'
               );
             }
@@ -442,11 +451,17 @@
             } else {
               /* Sentence */
               if (kind === 'ref') {
-                out.push(no + '. ' + (row.zh || ''));
-                out.push('   ' + (row.text || ''));
+                if (row.zh) {
+                  out.push(no + '. ' + row.zh);
+                  out.push('   ' + (row.text || ''));
+                } else {
+                  out.push(no + '. ' + (row.text || ''));
+                }
               } else {
-                out.push(no + '. ' + (row.zh || ''));
-                out.push('   ____________________________________');
+                if (row.zh) {
+                  out.push(no + '. ' + row.zh);
+                }
+                out.push((row.zh ? '   ' : no + '. ') + '____________________________________');
               }
             }
           });
