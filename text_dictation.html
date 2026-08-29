@@ -83,8 +83,8 @@
         -webkit-text-size-adjust: none;
         forced-color-adjust: none;
         transform-origin: 0 0;
-        user-select: text !important;
-        cursor: text;
+        user-select: none !important;
+        cursor: crosshair;
         z-index: 20;
       }
 
@@ -93,12 +93,32 @@
         color: transparent !important;
         position: absolute;
         white-space: pre;
-        cursor: text;
+        cursor: crosshair;
         transform-origin: 0% 0%;
       }
 
-      ::selection {
-        background: rgba(74, 144, 226, 0.3);
+      .drag-select-box {
+        position: absolute;
+        z-index: 45;
+        border: 1px dashed rgba(37, 99, 235, 0.95);
+        background: rgba(59, 130, 246, 0.2);
+        border-radius: 2px;
+        pointer-events: none;
+      }
+
+      .selection-feedback {
+        position: absolute;
+        z-index: 18;
+        border: 1px solid rgba(59, 130, 246, 0.95);
+        background: rgba(59, 130, 246, 0.18);
+        border-radius: 2px;
+        pointer-events: none;
+        animation: selection-fade-out 0.75s ease-out forwards;
+      }
+
+      @keyframes selection-fade-out {
+        0% { opacity: 1; }
+        100% { opacity: 0; }
       }
     </style>
   </head>
@@ -108,15 +128,6 @@
       <header class="flex-shrink-0 z-40 bg-white border-b border-gray-200 shadow-sm relative px-4 py-3">
         <div class="flex items-center gap-3 min-w-0 mb-2 flex-wrap">
           <h1 class="text-sm sm:text-base font-semibold text-slate-800 shrink-0">课文默写（看中文写英文）</h1>
-
-          <label class="text-sm text-slate-700 shrink-0" for="gradeInput">年级：</label>
-          <input
-            id="gradeInput"
-            class="border border-slate-300 rounded px-2 py-1 text-sm w-16"
-            v-model.trim="grade"
-            :disabled="isUnitLoading"
-            @change="onUnitChange"
-          />
 
           <label class="text-sm text-slate-700 shrink-0" for="unitSelect">单元：</label>
           <select
@@ -139,41 +150,39 @@
           <div class="flex items-center gap-2 shrink-0">
             <button
               type="button"
+              class="px-4 py-1.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 shrink-0"
+              @click="exitDictationMode"
+            >
+              退出默写标注
+            </button>
+            <button
+              type="button"
+              class="px-4 py-1.5 text-sm font-medium rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 shrink-0"
+              @click="clearCurrentUnitRows"
+            >
+              清空本单元默写
+            </button>
+            <button
+              type="button"
               class="px-4 py-1.5 text-sm font-medium rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shrink-0"
               @click="saveRowsManual"
             >
-              保存
+              保存默写标注
             </button>
             <button
               type="button"
               class="px-4 py-1.5 text-sm font-medium rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 shrink-0"
-              @click="downloadCsv"
+              @click="goToDashboard"
             >
-              导出 CSV
+              查看汇总
             </button>
             <button
               type="button"
               class="px-4 py-1.5 text-sm font-medium rounded-lg border border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 shrink-0"
-              @click="openCsvPrint"
+              @click="goToAnnotation"
             >
-              一键传递排版
+              回到标注
             </button>
-            <a
-              href="/csvprint.html"
-              class="px-4 py-1.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 shrink-0"
-              target="_blank"
-              rel="noopener"
-            >
-              打开排版工具
-            </a>
-            <a
-              href="/index.html"
-              class="px-4 py-1.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 shrink-0"
-              target="_blank"
-              rel="noopener"
-            >
-              返回主标注
-            </a>
           </div>
         </div>
       </header>
@@ -188,7 +197,7 @@
         >
           <div class="p-3 bg-gray-50/80 border-b border-gray-100 flex-shrink-0">
             <h2 class="text-sm font-semibold text-slate-800">课文默写卡片</h2>
-            <p class="mt-1 text-xs text-slate-500">在 PDF 左侧直接鼠标划选文本，系统会按 . ? ! 或换行自动断句并追加卡片。</p>
+            <p class="mt-1 text-xs text-slate-500">在 PDF 左侧拖拽画出矩形区域，系统会提取框内文本并按 . ? ! 或换行自动断句追加卡片。</p>
           </div>
 
           <div v-if="!rows.length" class="py-12 px-6 text-center text-gray-400 text-sm leading-relaxed">
@@ -345,39 +354,29 @@
               }
               return chunks;
             },
-            escapeCsvField(value) {
-              const raw = value === null || value === undefined ? '' : String(value);
-              return `"${raw.replace(/"/g, '""')}"`;
+            goTo(path) {
+              window.location.href = path;
             },
-            generateCsvText() {
-              const lines = [["英文原句", "中文翻译"].map((cell) => this.escapeCsvField(cell)).join(',')];
-              for (const row of this.rows) {
-                lines.push([
-                  this.escapeCsvField(row?.text || ''),
-                  this.escapeCsvField(row?.zh || '')
-                ].join(','));
+            exitDictationMode() {
+              this.goTo('/index.html');
+            },
+            goToDashboard() {
+              this.goTo('/dashboard.html');
+            },
+            goToAnnotation() {
+              this.goTo('/index.html');
+            },
+            clearCurrentUnitRows() {
+              const count = this.rows.length;
+              if (!count) {
+                this.setStatus('当前单元没有可清空的句卡。');
+                return;
               }
-              return `\uFEFF${lines.join('\r\n')}`;
-            },
-            downloadCsv() {
-              const csvText = this.generateCsvText();
-              const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
-              const link = document.createElement('a');
-              const url = URL.createObjectURL(blob);
-              link.href = url;
-              link.download = `${this.currentKvKey()}.csv`;
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-              URL.revokeObjectURL(url);
-              this.setStatus('已导出 CSV（英文原句/中文翻译）。');
-            },
-            openCsvPrint() {
-              const csvText = this.generateCsvText().replace(/^\uFEFF/, '');
-              const title = `${this.normalizedGrade().toUpperCase()} Unit ${Number(this.currentUnit)} Text Dictation`;
-              const url = `/csvprint.html?title=${encodeURIComponent(title)}&csv=${encodeURIComponent(csvText)}`;
-              window.open(url, '_blank', 'noopener');
-              this.setStatus('已传递当前 CSV 到排版工具。');
+              const ok = window.confirm(`确认清空 Unit ${Number(this.currentUnit)} 的 ${count} 条默写卡片吗？此操作可在保存后生效。`);
+              if (!ok) return;
+              this.rows = [];
+              this.markDirty();
+              this.setStatus(`已清空 Unit ${Number(this.currentUnit)} 的默写卡片，请记得保存。`);
             },
             async saveRowsManual() {
               try {
@@ -490,6 +489,31 @@
                 height: bottom - top
               };
             },
+            createDragBox(pageDiv) {
+              const box = document.createElement('div');
+              box.className = 'drag-select-box';
+              pageDiv.appendChild(box);
+              return box;
+            },
+            updateDragBox(boxEl, rect) {
+              if (!boxEl) return;
+              boxEl.style.left = `${rect.left}px`;
+              boxEl.style.top = `${rect.top}px`;
+              boxEl.style.width = `${rect.width}px`;
+              boxEl.style.height = `${rect.height}px`;
+            },
+            showSelectionFeedback(pageDiv, rect) {
+              const feedback = document.createElement('div');
+              feedback.className = 'selection-feedback';
+              feedback.style.left = `${rect.left}px`;
+              feedback.style.top = `${rect.top}px`;
+              feedback.style.width = `${rect.width}px`;
+              feedback.style.height = `${rect.height}px`;
+              pageDiv.appendChild(feedback);
+              window.setTimeout(() => {
+                if (feedback.parentNode) feedback.parentNode.removeChild(feedback);
+              }, 780);
+            },
             computeIntersectionArea(a, b) {
               const left = Math.max(a.left, b.left);
               const top = Math.max(a.top, b.top);
@@ -565,23 +589,74 @@
             },
             clearDragState() {
               const state = this.dragState;
+              if (state?.moveHandler) document.removeEventListener('mousemove', state.moveHandler);
               if (state?.upHandler) document.removeEventListener('mouseup', state.upHandler);
+              if (state?.touchMoveHandler) document.removeEventListener('touchmove', state.touchMoveHandler);
+              if (state?.touchEndHandler) document.removeEventListener('touchend', state.touchEndHandler);
+              if (state?.dragBoxEl?.parentNode) {
+                state.dragBoxEl.parentNode.removeChild(state.dragBoxEl);
+              }
               this.dragState = null;
             },
             onMouseDownForSelect(event, pageDiv) {
-              if (event.button !== 0) return;
+              const isTouch = event.type.startsWith('touch');
+              if (!isTouch && event.button !== 0) return;
+              event.preventDefault();
+              window.getSelection()?.removeAllRanges();
+              this.clearDragState();
+
               const start = this.getRelativePoint(event, pageDiv);
+              const dragBoxEl = this.createDragBox(pageDiv);
+
+              const moveHandler = (moveEvent) => {
+                if (!this.dragState) return;
+                moveEvent.preventDefault();
+                const current = this.getRelativePoint(moveEvent, pageDiv);
+                this.dragState.current = current;
+                const rect = this.buildRectFromPoints(this.dragState.start, current);
+                this.updateDragBox(dragBoxEl, rect);
+              };
+
               const upHandler = (upEvent) => {
+                if (!this.dragState) return;
+                upEvent.preventDefault();
                 const end = this.getRelativePoint(upEvent, pageDiv);
-                const rect = this.buildRectFromPoints(start, end);
+                const rect = this.buildRectFromPoints(this.dragState.start, end);
                 this.finishDragSelect(pageDiv, rect);
                 this.clearDragState();
               };
-              this.dragState = { upHandler };
+
+              const touchMoveHandler = isTouch ? moveHandler : null;
+              const touchEndHandler = isTouch ? upHandler : null;
+
+              this.dragState = {
+                pageDiv,
+                start,
+                current: start,
+                dragBoxEl,
+                moveHandler,
+                upHandler,
+                touchMoveHandler,
+                touchEndHandler
+              };
+
+              this.updateDragBox(dragBoxEl, {
+                left: start.x,
+                top: start.y,
+                width: 0,
+                height: 0
+              });
+
+              document.addEventListener('mousemove', moveHandler);
               document.addEventListener('mouseup', upHandler);
+              if (isTouch) {
+                document.addEventListener('touchmove', touchMoveHandler, { passive: false });
+                document.addEventListener('touchend', touchEndHandler, { passive: false });
+              }
             },
             finishDragSelect(pageDiv, finalRect) {
               if (finalRect.width < 3 || finalRect.height < 3) return;
+              this.showSelectionFeedback(pageDiv, finalRect);
               const allTokens = pageDiv.__tokens || [];
               const hitTokens = this.findHitTokens(allTokens, finalRect);
               if (!hitTokens.length) {
@@ -727,6 +802,9 @@
               if (loadToken !== this.currentLoadToken) return false;
 
               textLayerDiv.addEventListener('mousedown', (event) => this.onMouseDownForSelect(event, pageDiv));
+              textLayerDiv.addEventListener('touchstart', (event) => this.onMouseDownForSelect(event, pageDiv), {
+                passive: false
+              });
               pageDiv.appendChild(textLayerDiv);
               return true;
             },
