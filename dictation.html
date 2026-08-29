@@ -250,11 +250,11 @@
       }
 
       function dictPoemLine(text) {
-        return String(text || '').replace(/\[([^\]]+)\]/g, '___________');
+        return String(text || '').replace(/[\[【]([^\]】]+)[\]】]/g, '___________');
       }
 
       function refPoemLineHtml(text) {
-        return escapeHtml(String(text || '')).replace(/\[([^\]]+)\]/g, '<u class="ref-highlight"><strong>$1</strong></u>');
+        return escapeHtml(String(text || '')).replace(/[\[【]([^\]】]+)[\]】]/g, '<u class="ref-highlight"><strong>$1</strong></u>');
       }
 
       function getPartRows(partKey) {
@@ -355,7 +355,7 @@
             list.forEach((row) => {
               splitPoemLines(row.text).forEach((line) => {
                 if (kind === 'ref') {
-                  out.push(String(line || '').replace(/\[([^\]]+)\]/g, '$1'));
+                  out.push(String(line || '').replace(/[\[【]([^\]】]+)[\]】]/g, '$1'));
                 } else {
                   out.push(dictPoemLine(line));
                 }
