@@ -127,9 +127,9 @@
       }
 
       function openDictationPrintSite(csvText, title) {
-        const csvQuery = encodeURIComponent(String(csvText || ''));
-        const titleQuery = title ? `&title=${encodeURIComponent(String(title))}` : '';
-        const targetUrl = `${CSV_PRINT_DICTATION_BASE}?type=text_dictation&csv=${csvQuery}${titleQuery}`;
+        const encodedTitle = encodeURIComponent(String(title || `Unit ${unitSelect.value} 课文默写`));
+        const encodedCsv = encodeURIComponent(String(csvText || ''));
+        const targetUrl = `${CSV_PRINT_DICTATION_BASE}?type=text_dictation&title=${encodedTitle}&csv=${encodedCsv}`;
         window.open(targetUrl, '_blank');
         statusEl.textContent = `已跳转：${title || 'Unit ' + unitSelect.value + ' 课文默写'}`;
       }
@@ -186,7 +186,7 @@
       }
 
       function buildDictationCsv(rows) {
-        const lines = [["板块", "英文原句", "中文释义"].map((cell) => escapeCsvField(cell)).join(',')];
+        const lines = [["板块", "英文原句", "中文释义 / 挖空词"].map((cell) => escapeCsvField(cell)).join(',')];
         for (const row of rows) {
           lines.push([
             escapeCsvField(sectionLabel(row?.section)),

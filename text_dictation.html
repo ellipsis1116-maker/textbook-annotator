@@ -213,7 +213,7 @@
               <div class="mb-2">
                 <label class="text-[11px] text-slate-500 mr-2">板块</label>
                 <select
-                  class="text-xs border border-slate-300 rounded px-2 py-1 bg-white"
+                  class="text-xs border border-slate-300 rounded px-2 py-1 bg-white w-auto max-w-[200px]"
                   v-model="row.section"
                   @change="onRowInput"
                 >
@@ -232,16 +232,26 @@
                 小诗挖空提示：可在英文中用中括号标记挖空词，例如：A [little] bird is in the [tree].
               </p>
 
-              <div class="text-[11px] text-slate-500 mt-2 mb-1">中文释义</div>
-              <textarea
-                class="w-full border rounded px-2 py-1 text-sm leading-6 resize-none overflow-hidden focus:outline-none focus:ring-2"
-                :class="hasZhText(row.zh) ? 'border-slate-300 focus:ring-blue-200' : 'border-red-300 focus:ring-red-200 bg-red-50/50'"
-                rows="1"
-                v-model="row.zh"
-                @input="onRowInput"
-              ></textarea>
+              <template v-if="!isRhymeSection(row.section)">
+                <div class="text-[11px] text-slate-500 mt-2 mb-1">中文释义</div>
+                <textarea
+                  class="w-full border rounded px-2 py-1 text-sm leading-6 resize-none overflow-hidden focus:outline-none focus:ring-2"
+                  :class="hasZhText(row.zh) ? 'border-slate-300 focus:ring-blue-200' : 'border-red-300 focus:ring-red-200 bg-red-50/50'"
+                  rows="1"
+                  v-model="row.zh"
+                  @input="onRowInput"
+                ></textarea>
+              </template>
 
               <div class="mt-2 flex items-center justify-end gap-2">
+                <button
+                  v-if="idx > 0"
+                  type="button"
+                  class="text-xs px-2 py-1 rounded border border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50"
+                  @click="mergeWithPreviousRow(idx)"
+                >
+                  🔗 和上一句合并
+                </button>
                 <button
                   type="button"
                   class="text-xs px-2 py-1 rounded border border-blue-200 text-blue-700 bg-white hover:bg-blue-50"
@@ -369,6 +379,20 @@
               this.markDirty();
               this.setStatus(`已在第 ${index + 2} 条插入拆分卡片。`);
             },
+            mergeWithPreviousRow(index) {
+              if (index <= 0 || index >= this.rows.length) return;
+              const current = this.rows[index];
+              const previous = this.rows[index - 1];
+              if (!current || !previous) return;
+
+              const prevText = String(previous.text || '').trim();
+              const currentText = String(current.text || '').trim();
+              previous.text = [prevText, currentText].filter(Boolean).join(' ').trim();
+
+              this.rows.splice(index, 1);
+              this.markDirty();
+              this.setStatus(`已将第 ${index + 1} 条合并到第 ${index} 条。`);
+            },
             deleteRow(index) {
               if (index < 0 || index >= this.rows.length) return;
               this.rows.splice(index, 1);
@@ -395,7 +419,7 @@
               return `"${raw.replace(/"/g, '""')}"`;
             },
             generateCsvText() {
-              const lines = [["板块", "英文原句", "中文释义"].map((cell) => this.escapeCsvField(cell)).join(',')];
+              const lines = [["板块", "英文原句", "中文释义 / 挖空词"].map((cell) => this.escapeCsvField(cell)).join(',')];
               for (const row of this.rows) {
                 lines.push([
                   this.escapeCsvField(this.sectionLabel(row?.section)),
