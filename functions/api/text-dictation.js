@@ -14,12 +14,22 @@ function responseHeaders() {
   };
 }
 
+const DEFAULT_SECTION = 'story_time';
+
+function normalizeSection(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'cartoon_time') return 'cartoon_time';
+  if (raw === 'rhyme_song') return 'rhyme_song';
+  return DEFAULT_SECTION;
+}
+
 function normalizeRows(list) {
   if (!Array.isArray(list)) return [];
   return list.map((item) => {
     const row = typeof item === 'object' && item ? item : {};
     return {
       id: String(row.id || crypto.randomUUID()),
+      section: normalizeSection(row.section),
       text: String(row.text || ''),
       zh: String(row.zh || ''),
       createdAt: Number.isFinite(Number(row.createdAt)) ? Number(row.createdAt) : Date.now()

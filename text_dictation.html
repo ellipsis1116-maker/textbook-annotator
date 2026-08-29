@@ -210,6 +210,17 @@
               :key="row.id"
               class="border rounded p-2 border-slate-200 bg-slate-50"
             >
+              <div class="mb-2">
+                <label class="text-[11px] text-slate-500 mr-2">板块</label>
+                <select
+                  class="text-xs border border-slate-300 rounded px-2 py-1 bg-white"
+                  v-model="row.section"
+                  @change="onRowInput"
+                >
+                  <option v-for="opt in sectionOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                </select>
+              </div>
+
               <div class="text-[11px] text-slate-500 mb-1">英文原句</div>
               <textarea
                 class="w-full border border-slate-300 rounded px-2 py-1 text-sm leading-6 resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-200"
@@ -217,6 +228,9 @@
                 v-model="row.text"
                 @input="onRowInput"
               ></textarea>
+              <p v-if="isRhymeSection(row.section)" class="mt-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                小诗挖空提示：可在英文中用中括号标记挖空词，例如：A [little] bird is in the [tree].
+              </p>
 
               <div class="text-[11px] text-slate-500 mt-2 mb-1">中文释义</div>
               <textarea
@@ -257,6 +271,12 @@
           'https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         const SCALE = 1.5;
         const TOKEN_HIT_RATIO = 0.3;
+        const DEFAULT_SECTION = 'story_time';
+        const SECTION_OPTIONS = [
+          { value: 'story_time', label: 'Story time' },
+          { value: 'cartoon_time', label: 'Cartoon time' },
+          { value: 'rhyme_song', label: 'Rhyme / Song (小诗挖空)' }
+        ];
         const UNIT_PDF_PATHS = {
           1: '/pdfs/unit1.pdf',
           2: '/pdfs/unit2.pdf',
@@ -286,6 +306,7 @@
           data() {
             return {
               units: [1, 2, 3, 4, 5, 6, 7, 8],
+              sectionOptions: SECTION_OPTIONS,
               grade: 'g5',
               currentUnit: 1,
               rows: [],
@@ -314,6 +335,20 @@
             hasZhText(value) {
               return typeof value === 'string' && value.trim().length > 0;
             },
+            normalizeSection(value) {
+              const raw = String(value || '').trim().toLowerCase();
+              if (raw === 'cartoon_time') return 'cartoon_time';
+              if (raw === 'rhyme_song') return 'rhyme_song';
+              return DEFAULT_SECTION;
+            },
+            isRhymeSection(value) {
+              return this.normalizeSection(value) === 'rhyme_song';
+            },
+            sectionLabel(value) {
+              const key = this.normalizeSection(value);
+              const match = this.sectionOptions.find((opt) => opt.value === key);
+              return match?.label || 'Story time';
+            },
             markDirty() {
               this.hasUnsavedChanges = true;
             },
@@ -326,6 +361,7 @@
               const copy = {
                 id: crypto.randomUUID(),
                 text: String(src.text || ''),
+                section: this.normalizeSection(src.section),
                 zh: '',
                 createdAt: Date.now()
               };
@@ -353,6 +389,21 @@
                 }
               }
               return chunks;
+            },
+            escapeCsvField(value) {
+              const raw = value === null || value === undefined ? '' : String(value);
+              return `"${raw.replace(/"/g, '""')}"`;
+            },
+            generateCsvText() {
+              const lines = [["板块", "英文原句", "中文释义"].map((cell) => this.escapeCsvField(cell)).join(',')];
+              for (const row of this.rows) {
+                lines.push([
+                  this.escapeCsvField(this.sectionLabel(row?.section)),
+                  this.escapeCsvField(row?.text || ''),
+                  this.escapeCsvField(row?.zh || '')
+                ].join(','));
+              }
+              return `\uFEFF${lines.join('\r\n')}`;
             },
             goTo(path) {
               window.location.href = path;
@@ -416,7 +467,10 @@
                   this.setStatus(result?.error || `读取失败（HTTP ${response.status}）`);
                   return;
                 }
-                this.rows = Array.isArray(result.rows) ? result.rows : [];
+                this.rows = (Array.isArray(result.rows) ? result.rows : []).map((row) => ({
+                  ...row,
+                  section: this.normalizeSection(row?.section)
+                }));
                 this.hasUnsavedChanges = false;
                 this.setStatus(`已加载 ${result.total} 条课文默写卡片（${result.key}）。`);
               } catch (error) {
@@ -677,6 +731,7 @@
               const newRows = sentences.map((sentence, i) => ({
                 id: crypto.randomUUID(),
                 text: sentence,
+                section: DEFAULT_SECTION,
                 zh: '',
                 createdAt: now + i
               }));

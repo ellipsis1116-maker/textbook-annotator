@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
@@ -27,6 +27,7 @@
                 <th class="text-center font-semibold px-4 py-3">*拓展词组</th>
                 <th class="text-center font-semibold px-4 py-3">核心句</th>
                 <th class="text-center font-semibold px-4 py-3">*拓展句</th>
+                <th class="text-center font-semibold px-4 py-3">课文默写 (句数)</th>
               </tr>
             </thead>
             <tbody id="summaryRows"></tbody>
@@ -38,6 +39,18 @@
         <div class="px-4 py-2.5 border-b border-slate-200 flex items-center justify-end gap-2 flex-wrap">
           <label class="text-sm text-slate-600" for="unitSelect">查看</label>
           <select id="unitSelect" class="border border-slate-300 rounded px-2 py-1.5 text-sm bg-white"></select>
+
+          <div class="inline-flex items-center rounded-lg border border-slate-300 overflow-hidden" role="radiogroup" aria-label="查看模式">
+            <label class="cursor-pointer px-3 py-1.5 text-sm bg-white text-slate-700 has-[:checked]:bg-violet-50 has-[:checked]:text-violet-700">
+              <input type="radio" name="viewMode" value="words" class="sr-only" checked />
+              词句标注
+            </label>
+            <label class="cursor-pointer px-3 py-1.5 text-sm bg-white text-slate-700 border-l border-slate-300 has-[:checked]:bg-violet-50 has-[:checked]:text-violet-700">
+              <input type="radio" name="viewMode" value="text_dictation" class="sr-only" />
+              课文默写
+            </label>
+          </div>
+
           <button id="refreshBtn" type="button" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">刷新</button>
           <button id="printBtn" type="button" class="px-3 py-1.5 text-sm rounded border border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100">📤 一键导出排版</button>
           <span id="status" class="text-xs text-slate-500 min-w-[7rem]" role="status" aria-live="polite">准备加载</span>
@@ -45,20 +58,14 @@
         <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
           <div>
             <h2 id="detailTitle" class="text-base font-semibold">Unit 1 明细</h2>
-            <p class="text-xs text-slate-500 mt-1">按页码、类型和类型内编号排序</p>
+            <p id="detailHint" class="text-xs text-slate-500 mt-1">按页码、类型和类型内编号排序</p>
           </div>
           <span id="detailTotal" class="text-sm text-slate-500">0 条</span>
         </div>
         <div class="overflow-auto max-h-[65vh]">
           <table class="min-w-full text-sm">
             <thead class="bg-slate-100 text-slate-700 sticky top-0">
-              <tr>
-                <th class="text-left font-semibold px-4 py-3">页码</th>
-                <th class="text-left font-semibold px-4 py-3">类型</th>
-                <th class="text-left font-semibold px-4 py-3">编号</th>
-                <th class="text-left font-semibold px-4 py-3">英文原文</th>
-                <th class="text-left font-semibold px-4 py-3">中文翻译</th>
-              </tr>
+              <tr id="detailHeadRow"></tr>
             </thead>
             <tbody id="detailRows"></tbody>
           </table>
@@ -68,6 +75,14 @@
 
     <script>
       const units = [1, 2, 3, 4, 5, 6, 7, 8];
+      const CURRENT_GRADE = (() => {
+        const raw = String(new URLSearchParams(window.location.search).get('grade') || 'g5').trim().toLowerCase();
+        return /^g\d+$/.test(raw) ? raw : 'g5';
+      })();
+      const VIEW_MODE = {
+        WORDS: 'words',
+        TEXT_DICTATION: 'text_dictation'
+      };
       const typeOrder = ['core_word', 'ext_word', 'core_phrase', 'ext_phrase', 'core_sentence', 'ext_sentence'];
       const typeLabels = {
         core_word: '核心单词',
@@ -77,46 +92,46 @@
         core_sentence: '核心句',
         ext_sentence: '*拓展句'
       };
+      const sectionLabels = {
+        story_time: 'Story time',
+        cartoon_time: 'Cartoon time',
+        rhyme_song: 'Rhyme / Song'
+      };
+
       const unitSelect = document.getElementById('unitSelect');
       const statusEl = document.getElementById('status');
       const grandTotalEl = document.getElementById('grandTotal');
       const summaryRowsEl = document.getElementById('summaryRows');
       const detailTitleEl = document.getElementById('detailTitle');
+      const detailHintEl = document.getElementById('detailHint');
       const detailTotalEl = document.getElementById('detailTotal');
+      const detailHeadRowEl = document.getElementById('detailHeadRow');
       const detailRowsEl = document.getElementById('detailRows');
-      const printBtn = document.getElementById('printBtn');
-      let unitPayloads = new Map();
+      const viewModeEls = Array.from(document.querySelectorAll('input[name="viewMode"]'));
 
-      // 内置排版页（同源 /csvprint.html）：点击 = 保存当前单元 CSV 到 KV（短 key），排版页用 key 自动加载
+      let currentViewMode = VIEW_MODE.WORDS;
+      let unitPayloads = new Map();
+      let dictationPayloads = new Map();
+
+      // 词句标注：内置排版页（同源 /csvprint.html）
       const CSV_PRINT_SITE_BASE = '/csvprint.html';
+      // 课文默写：指定外部排版页
+      const CSV_PRINT_DICTATION_BASE = 'https://csvprint.pages.dev/';
 
       function openCsvPrintSiteByKey(key, title) {
         const encodedKey = encodeURIComponent(key || '');
         const titleQuery = title ? `&title=${encodeURIComponent(String(title))}` : '';
-        const targetUrl = `${CSV_PRINT_SITE_BASE}?key=${encodedKey}${titleQuery}`;
+        const targetUrl = `${CSV_PRINT_SITE_BASE}?key=${encodedKey}&type=words${titleQuery}`;
         window.open(targetUrl, '_blank');
         statusEl.textContent = `已跳转：${title || 'Unit ' + unitSelect.value}`;
       }
 
-      async function handlePrintClick() {
-        const unit = Number(unitSelect.value || '1');
-        statusEl.textContent = '正在保存并生成分享链接...';
-        try {
-          const response = await fetch('/api/create-share', {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json'
-            },
-            body: JSON.stringify({ unit })
-          });
-          const payload = await response.json();
-          if (!response.ok || !payload?.ok) {
-            throw new Error(payload?.error || `HTTP ${response.status}`);
-          }
-          openCsvPrintSiteByKey(payload.key, payload.title);
-        } catch (error) {
-          statusEl.textContent = `保存/跳转失败：${String(error?.message || error)}`;
-        }
+      function openDictationPrintSite(csvText, title) {
+        const csvQuery = encodeURIComponent(String(csvText || ''));
+        const titleQuery = title ? `&title=${encodeURIComponent(String(title))}` : '';
+        const targetUrl = `${CSV_PRINT_DICTATION_BASE}?type=text_dictation&csv=${csvQuery}${titleQuery}`;
+        window.open(targetUrl, '_blank');
+        statusEl.textContent = `已跳转：${title || 'Unit ' + unitSelect.value + ' 课文默写'}`;
       }
 
       function escapeHtml(value) {
@@ -128,12 +143,26 @@
           .replace(/'/g, '&#039;');
       }
 
+      function escapeCsvField(value) {
+        const raw = value === null || value === undefined ? '' : String(value);
+        return `"${raw.replace(/"/g, '""')}"`;
+      }
+
+      function sectionLabel(value) {
+        const key = String(value || '').trim().toLowerCase();
+        return sectionLabels[key] || sectionLabels.story_time;
+      }
+
       function getType(row) {
         return typeLabels[row?.pen] ? row.pen : typeOrder.includes(row?.type) ? row.type : 'core_word';
       }
 
       function getRows(payload) {
         return Array.isArray(payload?.annotations) ? payload.annotations : [];
+      }
+
+      function getDictationRows(payload) {
+        return Array.isArray(payload?.rows) ? payload.rows : [];
       }
 
       function sortRows(rows) {
@@ -156,12 +185,60 @@
         });
       }
 
+      function buildDictationCsv(rows) {
+        const lines = [["板块", "英文原句", "中文释义"].map((cell) => escapeCsvField(cell)).join(',')];
+        for (const row of rows) {
+          lines.push([
+            escapeCsvField(sectionLabel(row?.section)),
+            escapeCsvField(row?.text || ''),
+            escapeCsvField(row?.zh || '')
+          ].join(','));
+        }
+        return `\uFEFF${lines.join('\r\n')}`;
+      }
+
+      async function handlePrintClick() {
+        const unit = Number(unitSelect.value || '1');
+        if (currentViewMode === VIEW_MODE.WORDS) {
+          statusEl.textContent = '正在保存并生成分享链接...';
+          try {
+            const response = await fetch('/api/create-share', {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json'
+              },
+              body: JSON.stringify({ unit })
+            });
+            const payload = await response.json();
+            if (!response.ok || !payload?.ok) {
+              throw new Error(payload?.error || `HTTP ${response.status}`);
+            }
+            openCsvPrintSiteByKey(payload.key, payload.title);
+          } catch (error) {
+            statusEl.textContent = `保存/跳转失败：${String(error?.message || error)}`;
+          }
+          return;
+        }
+
+        try {
+          const payload = dictationPayloads.get(unit) || { rows: [] };
+          const rows = getDictationRows(payload);
+          const csvText = buildDictationCsv(rows);
+          const title = `${CURRENT_GRADE.toUpperCase()} Unit ${unit} 课文默写`;
+          openDictationPrintSite(csvText, title);
+        } catch (error) {
+          statusEl.textContent = `导出失败：${String(error?.message || error)}`;
+        }
+      }
+
       function renderSummary() {
         let grandTotal = 0;
         summaryRowsEl.innerHTML = units.map((unit) => {
           const payload = unitPayloads.get(unit);
           const counts = payload?.byPen || {};
           const rows = getRows(payload);
+          const dictationPayload = dictationPayloads.get(unit);
+          const dictCount = Number(dictationPayload?.total ?? getDictationRows(dictationPayload).length) || 0;
           grandTotal += rows.length;
           return `<tr class="border-t border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-gray-50">
             <td class="px-4 py-3 font-medium">Unit ${unit}</td>
@@ -169,28 +246,98 @@
               const count = Number(counts[type] ?? rows.filter((row) => getType(row) === type).length) || 0;
               return `<td class="px-4 py-3 text-center ${count ? 'font-bold text-slate-900' : 'text-slate-400'}">${count || '-'}</td>`;
             }).join('')}
+            <td class="px-4 py-3 text-center ${dictCount ? 'font-bold text-slate-900' : 'text-slate-400'}">${dictCount || '-'}</td>
           </tr>`;
         }).join('');
         grandTotalEl.textContent = `${grandTotal} 条`;
       }
 
-      function renderDetails(unit) {
-        const payload = unitPayloads.get(unit) || { annotations: [] };
-        const rows = sortRows(getRows(payload));
-        detailTitleEl.textContent = `Unit ${unit} 明细`;
-        detailTotalEl.textContent = `${rows.length} 条`;
-        if (!rows.length) {
-          detailRowsEl.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">暂无标注</td></tr>';
+      function renderDetailHead() {
+        if (currentViewMode === VIEW_MODE.WORDS) {
+          detailHeadRowEl.innerHTML = `
+            <th class="text-left font-semibold px-4 py-3">页码</th>
+            <th class="text-left font-semibold px-4 py-3">类型</th>
+            <th class="text-left font-semibold px-4 py-3">编号</th>
+            <th class="text-left font-semibold px-4 py-3">英文原文</th>
+            <th class="text-left font-semibold px-4 py-3">中文翻译</th>
+          `;
+          detailHintEl.textContent = '按页码、类型和类型内编号排序';
           return;
         }
-        detailRowsEl.innerHTML = rows.map(({ row, type, indexNum }) => `
+        detailHeadRowEl.innerHTML = `
+          <th class="text-left font-semibold px-4 py-3">板块</th>
+          <th class="text-left font-semibold px-4 py-3">英文原句</th>
+          <th class="text-left font-semibold px-4 py-3">中文释义 / 挖空词</th>
+        `;
+        detailHintEl.textContent = '按课文默写保存顺序展示';
+      }
+
+      function renderDetails(unit) {
+        if (currentViewMode === VIEW_MODE.WORDS) {
+          const payload = unitPayloads.get(unit) || { annotations: [] };
+          const rows = sortRows(getRows(payload));
+          detailTitleEl.textContent = `Unit ${unit} 词句标注明细`;
+          detailTotalEl.textContent = `${rows.length} 条`;
+          if (!rows.length) {
+            detailRowsEl.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">暂无标注</td></tr>';
+            return;
+          }
+          detailRowsEl.innerHTML = rows.map(({ row, type, indexNum }) => `
+            <tr class="border-t border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-gray-50 align-top">
+              <td class="px-4 py-3 whitespace-nowrap">第 ${escapeHtml(Number(row?.pageNum) || '-')} 页</td>
+              <td class="px-4 py-3 whitespace-nowrap">${escapeHtml(typeLabels[type])}</td>
+              <td class="px-4 py-3 font-medium">${indexNum}</td>
+              <td class="px-4 py-3 min-w-[16rem] whitespace-pre-wrap">${escapeHtml(row?.text || row?.enText || '-')}</td>
+              <td class="px-4 py-3 min-w-[12rem] whitespace-pre-wrap ${row?.zh || row?.zhText ? 'text-slate-700' : 'text-slate-400'}">${escapeHtml(row?.zh || row?.zhText || '-')}</td>
+            </tr>`).join('');
+          return;
+        }
+
+        const payload = dictationPayloads.get(unit) || { rows: [] };
+        const rows = getDictationRows(payload);
+        detailTitleEl.textContent = `Unit ${unit} 课文默写`;
+        detailTotalEl.textContent = `${rows.length} 句`;
+        if (!rows.length) {
+          detailRowsEl.innerHTML = '<tr><td colspan="3" class="px-4 py-8 text-center text-slate-400">暂无课文默写句子</td></tr>';
+          return;
+        }
+        detailRowsEl.innerHTML = rows.map((row) => `
           <tr class="border-t border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-gray-50 align-top">
-            <td class="px-4 py-3 whitespace-nowrap">第 ${escapeHtml(Number(row?.pageNum) || '-')} 页</td>
-            <td class="px-4 py-3 whitespace-nowrap">${escapeHtml(typeLabels[type])}</td>
-            <td class="px-4 py-3 font-medium">${indexNum}</td>
-            <td class="px-4 py-3 min-w-[16rem]">${escapeHtml(row?.text || row?.enText || '-')}</td>
-            <td class="px-4 py-3 min-w-[12rem] ${row?.zh || row?.zhText ? 'text-slate-700' : 'text-slate-400'}">${escapeHtml(row?.zh || row?.zhText || '-')}</td>
-          </tr>`).join('');
+            <td class="px-4 py-3 whitespace-nowrap">${escapeHtml(sectionLabel(row?.section))}</td>
+            <td class="px-4 py-3 min-w-[18rem] whitespace-pre-wrap">${escapeHtml(row?.text || '-')}</td>
+            <td class="px-4 py-3 min-w-[14rem] whitespace-pre-wrap ${row?.zh ? 'text-slate-700' : 'text-slate-400'}">${escapeHtml(row?.zh || '-')}</td>
+          </tr>
+        `).join('');
+      }
+
+      function setViewMode(mode) {
+        currentViewMode = mode === VIEW_MODE.TEXT_DICTATION ? VIEW_MODE.TEXT_DICTATION : VIEW_MODE.WORDS;
+        viewModeEls.forEach((el) => {
+          el.checked = el.value === currentViewMode;
+        });
+        renderDetailHead();
+        renderDetails(Number(unitSelect.value || '1'));
+      }
+
+      async function fetchDictationPayload(unit) {
+        try {
+          const response = await fetch(
+            `/api/text-dictation?grade=${encodeURIComponent(CURRENT_GRADE)}&unit=${encodeURIComponent('unit' + String(unit))}`,
+            { cache: 'no-store' }
+          );
+          const payload = await response.json();
+          if (!response.ok || !payload?.ok) {
+            return { ok: false, rows: [], total: 0, error: payload?.error || `HTTP ${response.status}` };
+          }
+          const rows = Array.isArray(payload.rows) ? payload.rows : [];
+          return {
+            ok: true,
+            rows,
+            total: Number.isFinite(Number(payload.total)) ? Number(payload.total) : rows.length
+          };
+        } catch (error) {
+          return { ok: false, rows: [], total: 0, error: String(error?.message || error) };
+        }
       }
 
       async function load() {
@@ -198,17 +345,26 @@
         statusEl.textContent = '加载中...';
         try {
           const results = await Promise.all(units.map(async (unit) => {
-            const response = await fetch('/api/annotations?unit=' + encodeURIComponent(String(unit)), { cache: 'no-store' });
-            const payload = await response.json();
-            if (!response.ok || !payload?.ok) throw new Error(payload?.error || `Unit ${unit} HTTP ${response.status}`);
-            return [unit, payload];
+            const [annotationResp, dictationPayload] = await Promise.all([
+              fetch('/api/annotations?unit=' + encodeURIComponent(String(unit)), { cache: 'no-store' }),
+              fetchDictationPayload(unit)
+            ]);
+            const annotationPayload = await annotationResp.json();
+            if (!annotationResp.ok || !annotationPayload?.ok) {
+              throw new Error(annotationPayload?.error || `Unit ${unit} HTTP ${annotationResp.status}`);
+            }
+            return [unit, annotationPayload, dictationPayload];
           }));
-          unitPayloads = new Map(results);
+
+          unitPayloads = new Map(results.map(([unit, annotationPayload]) => [unit, annotationPayload]));
+          dictationPayloads = new Map(results.map(([unit, , dictationPayload]) => [unit, dictationPayload]));
           renderSummary();
+          renderDetailHead();
           renderDetails(selectedUnit);
-          statusEl.textContent = '已同步 8 个单元';
+          statusEl.textContent = `已同步 ${units.length} 个单元（词句标注 + 课文默写）`;
         } catch (error) {
           statusEl.textContent = `加载失败：${String(error?.message || error)}`;
+          renderDetailHead();
           renderDetails(selectedUnit);
         }
       }
@@ -219,10 +375,19 @@
         option.textContent = `Unit ${unit}`;
         unitSelect.appendChild(option);
       }
+
       unitSelect.value = '1';
       unitSelect.addEventListener('change', () => renderDetails(Number(unitSelect.value)));
+      viewModeEls.forEach((radio) => {
+        radio.addEventListener('change', () => {
+          if (radio.checked) setViewMode(radio.value);
+        });
+      });
+
       document.getElementById('refreshBtn').addEventListener('click', load);
       document.getElementById('printBtn').addEventListener('click', handlePrintClick);
+
+      setViewMode(VIEW_MODE.WORDS);
       load();
     </script>
   </body>
