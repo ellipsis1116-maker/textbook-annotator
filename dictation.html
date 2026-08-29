@@ -117,7 +117,7 @@
         <label class="flex items-center gap-2">上传 3 列 CSV
           <input id="fileInput" type="file" accept=".csv,text/csv" class="text-xs" />
         </label>
-        <button id="btnRender" type="button" class="px-3 py-1.5 text-sm rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100">⚡ 立即渲染</button>
+
       </div>
     </header>
 
@@ -531,7 +531,7 @@
       }
 
       document.getElementById('btnPrint').addEventListener('click', () => window.print());
-      document.getElementById('btnRender').addEventListener('click', render);
+
       document.getElementById('btnCopyRef').addEventListener('click', () => copyText(buildCopyText('ref'), '参考单'));
       document.getElementById('btnCopyDict').addEventListener('click', () => copyText(buildCopyText('dict'), '默写纸'));
       titleInput.addEventListener('change', render);
