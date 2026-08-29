@@ -55,7 +55,7 @@
       }
       .zh-line { color: #334155; }
       .en-line { color: #0f172a; }
-      .zh-sub {
+      .en-sub {
         font-size: 12px;
         color: #64748b;
         margin-top: 2px;
@@ -68,8 +68,8 @@
         width: 100%;
       }
       .poem-line {
-        font-size: 14px;
-        line-height: 1.9;
+        font-size: 13px;
+        line-height: 1.8;
         white-space: pre-wrap;
       }
       .ref-highlight strong { font-weight: 800; }
@@ -268,12 +268,15 @@
           .filter(Boolean);
       }
 
+      /* Match [word] or 【word】 cloze markers (greedy within bracket pairs) */
+      const CLOZE_RE = /(?:\[|【)(.*?)(?:\]|】)/g;
+
       function dictPoemLine(text) {
-        return String(text || '').replace(/[\[【]([^\]】]+)[\]】]/g, '___________');
+        return String(text || '').replace(CLOZE_RE, '___________');
       }
 
       function refPoemLineHtml(text) {
-        return escapeHtml(String(text || '')).replace(/[\[【]([^\]】]+)[\]】]/g, '<u class="ref-highlight"><strong>$1</strong></u>');
+        return escapeHtml(String(text || '')).replace(CLOZE_RE, '<u class="ref-highlight"><strong>$1</strong></u>');
       }
 
       function getPartRows(partKey) {
@@ -298,18 +301,18 @@
             list.forEach((row, idx) => {
               const no = idx + 1;
 
-              /* Reference List: number + english, chinese subtitle below */
+              /* Reference List: 序号 + 中文释义（主行）+ 英文原句（灰色副行） */
               refHtml.push(
                 '<div class="row-item">' +
                   '<span class="row-no">' + no + '.</span>' +
                   '<div class="row-body">' +
-                    '<div class="en-line">' + escapeHtml(row.text || '') + '</div>' +
-                    '<div class="zh-sub">' + escapeHtml(row.zh || '') + '</div>' +
+                    '<div class="zh-line">' + escapeHtml(row.zh || '') + '</div>' +
+                    '<div class="en-sub">' + escapeHtml(row.text || '') + '</div>' +
                   '</div>' +
                 '</div>'
               );
 
-              /* Dictation Sheet: number + chinese prompt, writing rule below */
+              /* Dictation Sheet: 序号 + 中文提示 + 书写横线 */
               dictHtml.push(
                 '<div class="row-item">' +
                   '<span class="row-no">' + no + '.</span>' +
@@ -321,12 +324,12 @@
               );
             });
           } else {
-            /* ── Rhyme / Song: poem mode ── */
+            /* ── Rhyme / Song: poem mode — NO chinese, NO answer rules ── */
             list.forEach((row, idx) => {
               const no = idx + 1;
               const poemLines = splitPoemLines(row.text);
 
-              /* Reference: number + poem lines with cloze words bolded & underlined */
+              /* Reference: 序号 + 原诗句（挖空词加粗+下划线） */
               refHtml.push(
                 '<div class="row-item">' +
                   '<span class="row-no">' + no + '.</span>' +
@@ -337,7 +340,7 @@
               });
               refHtml.push('</div></div>');
 
-              /* Dictation: number + poem lines with blanks */
+              /* Dictation: 序号 + 挖空后英文诗句（[word]/【word】→ ___________） */
               dictHtml.push(
                 '<div class="row-item">' +
                   '<span class="row-no">' + no + '.</span>' +
@@ -389,8 +392,8 @@
             list.forEach((row, idx) => {
               const no = idx + 1;
               if (kind === 'ref') {
-                out.push(no + '. ' + (row.text || ''));
-                out.push('   ' + (row.zh || ''));
+                out.push(no + '. ' + (row.zh || ''));
+                out.push('   ' + (row.text || ''));
               } else {
                 out.push(no + '. ' + (row.zh || ''));
                 out.push('   ____________________________________');
@@ -403,7 +406,7 @@
               poemLines.forEach((line, li) => {
                 const prefix = li === 0 ? (no + '. ') : '   ';
                 if (kind === 'ref') {
-                  out.push(prefix + String(line || '').replace(/[\[【]([^\]】]+)[\]】]/g, '$1'));
+                  out.push(prefix + String(line || '').replace(CLOZE_RE, '$1'));
                 } else {
                   out.push(prefix + dictPoemLine(line));
                 }
