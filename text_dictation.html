@@ -297,10 +297,10 @@
           'https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         const SCALE = 1.5;
         const TOKEN_HIT_RATIO = 0.3;
-        const DEFAULT_SECTION = 'story_time';
+        const DEFAULT_SECTION = 'cartoon_time';
         const SECTION_OPTIONS = [
-          { value: 'story_time', label: 'Story time', topLabel: 'Story time' },
           { value: 'cartoon_time', label: 'Cartoon time', topLabel: 'Cartoon time' },
+          { value: 'story_time', label: 'Story time', topLabel: 'Story time' },
           { value: 'rhyme_song', label: 'Rhyme / Song', topLabel: '小诗填空 (Rhyme / Song)' }
         ];
         const UNIT_PDF_PATHS = {
@@ -365,6 +365,7 @@
             normalizeSection(value) {
               const raw = String(value || '').trim().toLowerCase();
               if (raw === 'cartoon_time') return 'cartoon_time';
+              if (raw === 'story_time') return 'story_time';
               if (raw === 'rhyme_song') return 'rhyme_song';
               return DEFAULT_SECTION;
             },
@@ -374,7 +375,7 @@
             sectionLabel(value) {
               const key = this.normalizeSection(value);
               const match = this.sectionOptions.find((opt) => opt.value === key);
-              return match?.label || 'Story time';
+              return match?.label || 'Cartoon time';
             },
             markDirty() {
               this.hasUnsavedChanges = true;
