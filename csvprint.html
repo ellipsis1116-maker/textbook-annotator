@@ -106,6 +106,18 @@
         core_sentence: '核心句',
         ext_sentence: '*拓展句'
       };
+      const RENDER_MODE = {
+        WORDS: 'words',
+        TEXT_DICTATION: 'text_dictation'
+      };
+      const DICTATION_SECTION_ORDER = ['story_time', 'cartoon_time', 'rhyme', 'song', 'rhyme_song'];
+      const DICTATION_SECTION_LABEL = {
+        story_time: 'Story time',
+        cartoon_time: 'Cartoon time',
+        rhyme: 'Rhyme',
+        song: 'Song',
+        rhyme_song: 'Rhyme / Song'
+      };
 
       const sheetsEl = document.getElementById('sheets');
       const noticeEl = document.getElementById('notice');
@@ -115,6 +127,7 @@
 
       let share = null;
       let rows = [];
+      let activeRenderMode = RENDER_MODE.WORDS;
 
       function qs(name) {
         return new URLSearchParams(window.location.search).get(name);
@@ -147,6 +160,26 @@
       function typeIndex(pen) {
         const i = TYPE_ORDER.indexOf(String(pen || ''));
         return i >= 0 ? i : 99;
+      }
+
+      function normalizeHeaderKey(value) {
+        return String(value || '').trim().toLowerCase().replace(/[\s_/]+/g, '');
+      }
+
+      function normalizeDictationSection(value) {
+        const raw = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+        if (!raw) return 'story_time';
+        if (raw === 'story' || raw === 'storytime' || raw === 'story_time') return 'story_time';
+        if (raw === 'cartoon' || raw === 'cartoontime' || raw === 'cartoon_time') return 'cartoon_time';
+        if (raw === 'rhyme' || raw === 'rhyme_time') return 'rhyme';
+        if (raw === 'song' || raw === 'song_time') return 'song';
+        if (raw === 'rhymesong' || raw === 'rhyme_song') return 'rhyme_song';
+        return 'story_time';
+      }
+
+      function sectionIndex(sectionKey) {
+        const idx = DICTATION_SECTION_ORDER.indexOf(sectionKey);
+        return idx >= 0 ? idx : 999;
       }
 
       function parseCsvTable(csvText) {
@@ -211,20 +244,65 @@
 
       function parseRowsFromCsvText(csvText) {
         const table = parseCsvTable(csvText);
-        if (!table.length) return [];
+        if (!table.length) return { mode: RENDER_MODE.WORDS, rows: [] };
 
         const headerRow = table[0].map((h) => String(h || '').trim());
-        const headerMap = new Map(headerRow.map((h, i) => [h, i]));
-        const hasHeader = headerMap.has('类型') || headerMap.has('英文') || headerMap.has('中文');
+        const normalizedHeader = headerRow.map((h) => normalizeHeaderKey(h));
+        const headerMap = new Map(normalizedHeader.map((h, i) => [h, i]));
+        const maxColumnCount = table.reduce((max, row) => Math.max(max, row.length), 0);
+
+        const hasDictationHeader =
+          normalizedHeader.includes('板块') ||
+          normalizedHeader.includes('section') ||
+          normalizedHeader.includes('英文原句') ||
+          normalizedHeader.includes('中文释义') ||
+          normalizedHeader.includes('挖空词');
+        const hasWordsHeader =
+          normalizedHeader.includes('类型') ||
+          normalizedHeader.includes('类别') ||
+          normalizedHeader.includes('英文') ||
+          normalizedHeader.includes('中文') ||
+          normalizedHeader.includes('序号') ||
+          normalizedHeader.includes('编号');
+
+        const isDictationCsv = hasDictationHeader || (!hasWordsHeader && maxColumnCount <= 3);
+
+        if (isDictationCsv) {
+          const hasHeader = hasDictationHeader;
+          const dataRows = hasHeader ? table.slice(1) : table;
+          const idxSection = hasHeader ? (headerMap.get('板块') ?? headerMap.get('section') ?? 0) : 0;
+          const idxText = hasHeader ? (headerMap.get('英文原句') ?? headerMap.get('英文') ?? headerMap.get('text') ?? 1) : 1;
+          const idxZh = hasHeader ? (headerMap.get('中文释义') ?? headerMap.get('挖空词') ?? headerMap.get('中文') ?? headerMap.get('zh') ?? 2) : 2;
+
+          const parsedRows = dataRows.map((r, i) => {
+            const sectionRaw = String(r[idxSection] ?? '').trim();
+            const section = normalizeDictationSection(sectionRaw);
+            const text = String(r[idxText] ?? '').trim();
+            const zh = String(r[idxZh] ?? '').trim();
+            return {
+              section,
+              sectionLabel: DICTATION_SECTION_LABEL[section] || DICTATION_SECTION_LABEL.story_time,
+              text,
+              zh,
+              manualOrder: i + 1,
+              pageNum: null,
+              createdAt: i + 1
+            };
+          }).filter((r) => r.text || r.zh);
+
+          return { mode: RENDER_MODE.TEXT_DICTATION, rows: parsedRows };
+        }
+
+        const hasHeader = hasWordsHeader;
         const dataRows = hasHeader ? table.slice(1) : table;
 
-        const idxType = hasHeader ? (headerMap.get('类型') ?? headerMap.get('type')) : 0;
-        const idxOrder = hasHeader ? (headerMap.get('序号') ?? headerMap.get('编号')) : 1;
-        const idxText = hasHeader ? (headerMap.get('英文') ?? headerMap.get('英文原文') ?? headerMap.get('text')) : 2;
-        const idxZh = hasHeader ? (headerMap.get('中文') ?? headerMap.get('中文翻译') ?? headerMap.get('zh')) : 3;
-        const idxPage = hasHeader ? (headerMap.get('页码') ?? headerMap.get('pageNum') ?? headerMap.get('page')) : -1;
+        const idxType = hasHeader ? (headerMap.get('类型') ?? headerMap.get('类别') ?? headerMap.get('type') ?? 0) : 0;
+        const idxOrder = hasHeader ? (headerMap.get('序号') ?? headerMap.get('编号') ?? headerMap.get('no') ?? 1) : 1;
+        const idxText = hasHeader ? (headerMap.get('英文') ?? headerMap.get('英文原文') ?? headerMap.get('text') ?? 2) : 2;
+        const idxZh = hasHeader ? (headerMap.get('中文') ?? headerMap.get('中文翻译') ?? headerMap.get('zh') ?? 3) : 3;
+        const idxPage = hasHeader ? (headerMap.get('页码') ?? headerMap.get('pagenum') ?? headerMap.get('page') ?? -1) : -1;
 
-        return dataRows.map((r, i) => {
+        const parsedRows = dataRows.map((r, i) => {
           const text = String(r[idxText] ?? '').trim();
           const zh = String(r[idxZh] ?? '').trim();
           const rawType = String(r[idxType] ?? '').trim();
@@ -240,6 +318,17 @@
             createdAt: i + 1
           };
         }).filter((r) => r.text || r.zh || r.pen);
+
+        return { mode: RENDER_MODE.WORDS, rows: parsedRows };
+      }
+
+      function renderSafely() {
+        try {
+          render();
+        } catch (error) {
+          setStatus('');
+          showNotice('渲染失败：' + String(error?.message || error), true);
+        }
       }
 
       async function load() {
@@ -247,18 +336,27 @@
         const csvParam = qs('csv');
         const titleParam = qs('title');
         const groupsParam = qs('groups');
+        const typeParam = String(qs('type') || '').trim().toLowerCase();
 
         setStatus('正在加载...');
         try {
           if (csvParam) {
             const csvText = String(csvParam || '');
             share = { csvText, title: titleParam || '' };
-            rows = parseRowsFromCsvText(csvText);
+            try {
+              const parsed = parseRowsFromCsvText(csvText);
+              rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+              activeRenderMode = parsed?.mode || (typeParam === RENDER_MODE.TEXT_DICTATION ? RENDER_MODE.TEXT_DICTATION : RENDER_MODE.WORDS);
+            } catch (error) {
+              rows = [];
+              activeRenderMode = typeParam === RENDER_MODE.TEXT_DICTATION ? RENDER_MODE.TEXT_DICTATION : RENDER_MODE.WORDS;
+              throw new Error('CSV 解析失败：' + String(error?.message || error));
+            }
             if (!titleInput.value) titleInput.value = titleParam || 'Unit';
             if (!groupInput.value) groupInput.value = groupsParam || '';
             setStatus('已从 URL 加载 ' + rows.length + ' 条');
             showNotice('');
-            render();
+            renderSafely();
             return;
           }
 
@@ -275,11 +373,12 @@
           }
           share = payload;
           rows = Array.isArray(payload.annotations) ? payload.annotations : [];
+          activeRenderMode = typeParam === RENDER_MODE.TEXT_DICTATION ? RENDER_MODE.TEXT_DICTATION : RENDER_MODE.WORDS;
           if (!titleInput.value) titleInput.value = titleParam || payload.title || ('Unit ' + payload.unit);
           if (!groupInput.value) groupInput.value = groupsParam || '';
           setStatus('已加载 ' + rows.length + ' 条（Unit ' + payload.unit + '）');
           showNotice('');
-          render();
+          renderSafely();
         } catch (error) {
           setStatus('');
           showNotice('加载失败：' + String(error?.message || error), true);
@@ -375,6 +474,23 @@
           .filter((g) => g.items.length > 0);
       }
 
+      function buildDictationSectionGroups(list) {
+        const buckets = new Map();
+        list.forEach((row) => {
+          const sectionKey = normalizeDictationSection(row?.section);
+          if (!buckets.has(sectionKey)) buckets.set(sectionKey, []);
+          buckets.get(sectionKey).push(row);
+        });
+
+        return Array.from(buckets.entries())
+          .sort((a, b) => sectionIndex(a[0]) - sectionIndex(b[0]))
+          .map(([sectionKey, items]) => ({
+            title: DICTATION_SECTION_LABEL[sectionKey] || DICTATION_SECTION_LABEL.story_time,
+            items: items.map((row, idx) => ({ row, no: String(idx + 1), isExt: false }))
+          }))
+          .filter((group) => group.items.length > 0);
+      }
+
       function buildPanelHtml(kind, groups) {
         const panelTitle = kind === 'ref' ? 'Reference List' : 'Dictation Sheet';
         let html = '<section class="panel"><h3 class="panel-title">' + escapeHtml(panelTitle) + '</h3>';
@@ -449,7 +565,9 @@
         for (const group of groups) {
           const list = rowsInGroup(rows, group);
           if (!list.length) continue;
-          const catGroups = buildCategoryGroups(list);
+          const catGroups = activeRenderMode === RENDER_MODE.TEXT_DICTATION
+            ? buildDictationSectionGroups(list)
+            : buildCategoryGroups(list);
           if (!catGroups.length) continue;
           rendered += 1;
           sheetsEl.appendChild(buildSpreadSheet({ title, group, groups: catGroups }));
@@ -465,7 +583,9 @@
         for (const group of groups) {
           const list = rowsInGroup(rows, group);
           if (!list.length) continue;
-          const catGroups = buildCategoryGroups(list);
+          const catGroups = activeRenderMode === RENDER_MODE.TEXT_DICTATION
+            ? buildDictationSectionGroups(list)
+            : buildCategoryGroups(list);
           if (!catGroups.length) continue;
 
           lines.push('【' + (kind === 'ref' ? 'Reference List' : 'Dictation Sheet') + '】' + title);
@@ -529,7 +649,7 @@
       document.getElementById('btnCopyDict').addEventListener('click', () => copyText(buildCopyText('dict'), '默写纸'));
       document.getElementById('btnSaveCsv').addEventListener('click', saveCsv);
 
-      load();
+      window.addEventListener('DOMContentLoaded', load);
 
     </script>
   </body>
