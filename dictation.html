@@ -26,14 +26,16 @@
         font-weight: 700;
         margin-bottom: 10px;
       }
-      .part-block { break-inside: avoid; margin-bottom: 14px; }
+      .part-block { break-inside: avoid; margin-bottom: 18px; }
       .part-title {
         font-size: 14px;
         font-weight: 700;
-        margin-bottom: 8px;
+        margin-bottom: 10px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid #e2e8f0;
       }
 
-      /* ── Flex row: number + content always on the same line ── */
+      /* ── Flex row: number + content always on the same baseline ── */
       .row-item {
         display: flex;
         align-items: flex-start;
@@ -53,24 +55,31 @@
         flex: 1;
         min-width: 0;
       }
-      .zh-line { color: #334155; }
-      .en-line { color: #0f172a; }
-      .en-sub {
-        font-size: 12px;
-        color: #64748b;
-        margin-top: 2px;
-        line-height: 1.5;
-      }
+
+      /* Sentence mode */
+      .zh-primary { color: #0f172a; font-weight: 500; }
+      .en-sub     { font-size: 12px; color: #64748b; margin-top: 2px; line-height: 1.5; }
       .answer-rule {
         border-bottom: 1px solid #9ca3af;
         margin-top: 8px;
         height: 24px;
         width: 100%;
       }
+
+      /* Poem / cloze mode */
       .poem-line {
         font-size: 13px;
         line-height: 1.8;
         white-space: pre-wrap;
+      }
+      .cloze-blank {
+        display: inline-block;
+        border-bottom: 1px solid #1e293b;
+        min-width: 60px;
+        padding: 0 4px;
+        text-align: center;
+        color: transparent;
+        user-select: none;
       }
       .ref-highlight strong { font-weight: 800; }
 
@@ -223,11 +232,11 @@
       }
 
       function normalizeSection(value) {
-        const raw = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+        const raw = String(value || '').trim().toLowerCase().replace(/[\s\-_/]+/g, '');
         if (!raw) return 'story_time';
-        if (raw === 'story' || raw === 'storytime' || raw === 'story_time') return 'story_time';
-        if (raw === 'cartoon' || raw === 'cartoontime' || raw === 'cartoon_time') return 'cartoon_time';
-        if (raw === 'rhyme' || raw === 'song' || raw === 'rhymesong' || raw === 'rhyme_song') return 'rhyme_song';
+        if (/story/.test(raw))         return 'story_time';
+        if (/cartoon/.test(raw))       return 'cartoon_time';
+        if (/rhyme|song|诗/.test(raw)) return 'rhyme_song';
         return 'story_time';
       }
 
@@ -249,15 +258,24 @@
 
         const dataRows = hasHeader ? table.slice(1) : table;
         const idxSection = hasHeader ? (headerMap.get('板块') ?? headerMap.get('section') ?? 0) : 0;
-        const idxText = hasHeader ? (headerMap.get('英文原句') ?? headerMap.get('英文') ?? 1) : 1;
-        const idxZh = hasHeader ? (headerMap.get('中文释义') ?? headerMap.get('挖空词') ?? headerMap.get('中文') ?? 2) : 2;
+        const idxText = hasHeader ? (headerMap.get('英文原句') ?? headerMap.get('英文') ?? headerMap.get('text') ?? 1) : 1;
+        const idxZh = hasHeader ? (headerMap.get('中文释义') ?? headerMap.get('挖空词') ?? headerMap.get('中文') ?? headerMap.get('zh') ?? 2) : 2;
 
-        return dataRows.map((row, i) => ({
-          id: i + 1,
-          section: normalizeSection(row[idxSection]),
-          text: String(row[idxText] ?? '').trim(),
-          zh: String(row[idxZh] ?? '').trim()
-        })).filter((row) => row.text || row.zh);
+        const parsed = dataRows.map((row, i) => {
+          const section = normalizeSection(row[idxSection]);
+          const english = String(row[idxText] ?? '').trim();
+          const chinese = String(row[idxZh] ?? '').trim();
+          if (!english && !chinese) return null;
+          return { id: i + 1, section, text: english, zh: chinese };
+        }).filter(Boolean);
+
+        /* Fallback: if no rows matched a non-default section → treat all as story_time */
+        const nonDefault = parsed.filter((r) => r.section !== 'story_time').length;
+        if (nonDefault === 0 && parsed.length) {
+          parsed.forEach((r) => { r.section = 'story_time'; });
+        }
+
+        return parsed;
       }
 
       function splitPoemLines(text) {
@@ -268,15 +286,38 @@
           .filter(Boolean);
       }
 
-      /* Match [word] or 【word】 cloze markers (greedy within bracket pairs) */
+      /* ── Cloze regex: matches [word] and 【word】 ── */
       const CLOZE_RE = /(?:\[|【)(.*?)(?:\]|】)/g;
 
-      function dictPoemLine(text) {
+      function hasCloze(text) {
+        CLOZE_RE.lastIndex = 0;
+        return CLOZE_RE.test(String(text || ''));
+      }
+
+      /** Reference HTML: strip brackets, bold + underline cloze word */
+      function refClozeHtml(text) {
+        return escapeHtml(String(text || '')).replace(
+          CLOZE_RE,
+          '<u class="ref-highlight"><strong>$1</strong></u>'
+        );
+      }
+
+      /** Dictation HTML: replace bracket groups with styled blank spans */
+      function dictClozeHtml(text) {
+        return escapeHtml(String(text || '')).replace(
+          CLOZE_RE,
+          '<span class="cloze-blank">____</span>'
+        );
+      }
+
+      /** Plain-text: replace brackets with underscores */
+      function dictClozePlain(text) {
         return String(text || '').replace(CLOZE_RE, '___________');
       }
 
-      function refPoemLineHtml(text) {
-        return escapeHtml(String(text || '')).replace(CLOZE_RE, '<u class="ref-highlight"><strong>$1</strong></u>');
+      /** Plain-text: strip brackets, keep word */
+      function refClozePlain(text) {
+        return String(text || '').replace(CLOZE_RE, '$1');
       }
 
       function getPartRows(partKey) {
@@ -291,67 +332,64 @@
           const list = getPartRows(part.key);
           if (!list.length) return;
 
+          const isPoem = part.mode === 'poem';
+
           refHtml.push('<section class="part-block">');
           refHtml.push('<h4 class="part-title">' + escapeHtml(part.title) + '</h4>');
           dictHtml.push('<section class="part-block">');
           dictHtml.push('<h4 class="part-title">' + escapeHtml(part.title) + '</h4>');
 
-          if (part.mode === 'sentence') {
-            /* ── Story / Cartoon: sentence mode ── */
-            list.forEach((row, idx) => {
-              const no = idx + 1;
+          list.forEach((row, idx) => {
+            const no = idx + 1;
+            const textHasCloze = isPoem || hasCloze(row.text);
 
-              /* Reference List: 序号 + 中文释义（主行）+ 英文原句（灰色副行） */
+            if (textHasCloze) {
+              /* ── Cloze / Poem — NO chinese, NO answer-rule lines ── */
+              const poemLines = splitPoemLines(row.text);
+
+              refHtml.push(
+                '<div class="row-item">' +
+                  '<span class="row-no">' + no + '.</span>' +
+                  '<div class="row-body">'
+              );
+              poemLines.forEach((line) => {
+                refHtml.push('<div class="poem-line">' + refClozeHtml(line) + '</div>');
+              });
+              refHtml.push('</div></div>');
+
+              dictHtml.push(
+                '<div class="row-item">' +
+                  '<span class="row-no">' + no + '.</span>' +
+                  '<div class="row-body">'
+              );
+              poemLines.forEach((line) => {
+                dictHtml.push('<div class="poem-line">' + dictClozeHtml(line) + '</div>');
+              });
+              dictHtml.push('</div></div>');
+
+            } else {
+              /* ── Sentence mode (Story / Cartoon) ── */
               refHtml.push(
                 '<div class="row-item">' +
                   '<span class="row-no">' + no + '.</span>' +
                   '<div class="row-body">' +
-                    '<div class="zh-line">' + escapeHtml(row.zh || '') + '</div>' +
+                    '<div class="zh-primary">' + escapeHtml(row.zh || '(暂无中文翻译)') + '</div>' +
                     '<div class="en-sub">' + escapeHtml(row.text || '') + '</div>' +
                   '</div>' +
                 '</div>'
               );
 
-              /* Dictation Sheet: 序号 + 中文提示 + 书写横线 */
               dictHtml.push(
                 '<div class="row-item">' +
                   '<span class="row-no">' + no + '.</span>' +
                   '<div class="row-body">' +
-                    '<div class="zh-line">' + escapeHtml(row.zh || '') + '</div>' +
+                    '<div class="zh-primary">' + escapeHtml(row.zh || '(请看中文写英文)') + '</div>' +
                     '<div class="answer-rule"></div>' +
                   '</div>' +
                 '</div>'
               );
-            });
-          } else {
-            /* ── Rhyme / Song: poem mode — NO chinese, NO answer rules ── */
-            list.forEach((row, idx) => {
-              const no = idx + 1;
-              const poemLines = splitPoemLines(row.text);
-
-              /* Reference: 序号 + 原诗句（挖空词加粗+下划线） */
-              refHtml.push(
-                '<div class="row-item">' +
-                  '<span class="row-no">' + no + '.</span>' +
-                  '<div class="row-body">'
-              );
-              poemLines.forEach((line) => {
-                refHtml.push('<div class="poem-line">' + refPoemLineHtml(line) + '</div>');
-              });
-              refHtml.push('</div></div>');
-
-              /* Dictation: 序号 + 挖空后英文诗句（[word]/【word】→ ___________） */
-              dictHtml.push(
-                '<div class="row-item">' +
-                  '<span class="row-no">' + no + '.</span>' +
-                  '<div class="row-body">'
-              );
-              poemLines.forEach((line) => {
-                dictHtml.push('<div class="poem-line">' + escapeHtml(dictPoemLine(line)) + '</div>');
-              });
-              dictHtml.push('</div></div>');
-            });
-          }
+            }
+          });
 
           refHtml.push('</section>');
           dictHtml.push('</section>');
@@ -367,7 +405,7 @@
 
         if (!rows.length) {
           sheetEl.classList.add('hidden');
-          showNotice('请先通过 URL 传入 csv 参数，或上传 3 列 CSV（板块,英文原句,中文释义/挖空词）。', true);
+          showNotice('请先通过 URL 传入 csv 参数，或上传 3 列 CSV（板块, 英文原句, 中文释义/挖空词）。', true);
           return;
         }
 
@@ -385,12 +423,24 @@
         PARTS.forEach((part) => {
           const list = getPartRows(part.key);
           if (!list.length) return;
+          const isPoem = part.mode === 'poem';
+
           out.push('');
           out.push(part.title);
 
-          if (part.mode === 'sentence') {
-            list.forEach((row, idx) => {
-              const no = idx + 1;
+          list.forEach((row, idx) => {
+            const no = idx + 1;
+            const textHasCloze = isPoem || hasCloze(row.text);
+
+            if (textHasCloze) {
+              /* Cloze / Poem */
+              const poemLines = splitPoemLines(row.text);
+              poemLines.forEach((line, li) => {
+                const prefix = li === 0 ? (no + '. ') : '   ';
+                out.push(prefix + (kind === 'ref' ? refClozePlain(line) : dictClozePlain(line)));
+              });
+            } else {
+              /* Sentence */
               if (kind === 'ref') {
                 out.push(no + '. ' + (row.zh || ''));
                 out.push('   ' + (row.text || ''));
@@ -398,22 +448,8 @@
                 out.push(no + '. ' + (row.zh || ''));
                 out.push('   ____________________________________');
               }
-            });
-          } else {
-            list.forEach((row, idx) => {
-              const no = idx + 1;
-              const poemLines = splitPoemLines(row.text);
-              poemLines.forEach((line, li) => {
-                const prefix = li === 0 ? (no + '. ') : '   ';
-                if (kind === 'ref') {
-                  out.push(prefix + String(line || '').replace(CLOZE_RE, '$1'));
-                } else {
-                  out.push(prefix + dictPoemLine(line));
-                }
-              });
-              out.push('');
-            });
-          }
+            }
+          });
         });
 
         return out.join('\n').trim();
