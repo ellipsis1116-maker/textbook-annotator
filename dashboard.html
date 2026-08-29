@@ -115,8 +115,8 @@
 
       // 词句标注：内置排版页（同源 /csvprint.html）
       const CSV_PRINT_SITE_BASE = '/csvprint.html';
-      // 课文默写：指定外部排版页
-      const CSV_PRINT_DICTATION_BASE = 'https://csvprint.pages.dev/';
+      // 课文默写：专属排版页
+      const DICTATION_PRINT_PATH = '/dictation.html';
 
       function openCsvPrintSiteByKey(key, title) {
         const encodedKey = encodeURIComponent(key || '');
@@ -129,9 +129,15 @@
       function openDictationPrintSite(csvText, title) {
         const encodedTitle = encodeURIComponent(String(title || `Unit ${unitSelect.value} 课文默写`));
         const encodedCsv = encodeURIComponent(String(csvText || ''));
-        const targetUrl = `${CSV_PRINT_DICTATION_BASE}?type=text_dictation&title=${encodedTitle}&csv=${encodedCsv}`;
+        const targetUrl = `${DICTATION_PRINT_PATH}?title=${encodedTitle}&csv=${encodedCsv}`;
         window.open(targetUrl, '_blank');
         statusEl.textContent = `已跳转：${title || 'Unit ' + unitSelect.value + ' 课文默写'}`;
+      }
+
+      function showDictationEmptyTip() {
+        const message = '当前单元暂无保存的课文默写内容，请先在课文默写页进行标注并保存。';
+        statusEl.textContent = message;
+        window.alert(message);
       }
 
       function escapeHtml(value) {
@@ -221,8 +227,16 @@
         }
 
         try {
-          const payload = dictationPayloads.get(unit) || { rows: [] };
+          const payload = dictationPayloads.get(unit);
+          if (!payload || payload?.ok === false) {
+            showDictationEmptyTip();
+            return;
+          }
           const rows = getDictationRows(payload);
+          if (!rows.length) {
+            showDictationEmptyTip();
+            return;
+          }
           const csvText = buildDictationCsv(rows);
           const title = `${CURRENT_GRADE.toUpperCase()} Unit ${unit} 课文默写`;
           openDictationPrintSite(csvText, title);
