@@ -1,0 +1,799 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>课文默写</title>
+
+    <link
+      rel="stylesheet"
+      href="https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.css"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/vue/3.3.4/vue.global.prod.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.js"></script>
+
+    <style>
+      body {
+        background: #f3f4f6;
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+
+      #app {
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+
+      #pdfContainer {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1.5rem;
+        padding: 1.5rem 0;
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+
+      textarea,
+      select,
+      button,
+      input {
+        user-select: text;
+        -webkit-user-select: text;
+      }
+
+      .page-container {
+        position: relative;
+        box-sizing: border-box;
+        margin: 0 auto 20px;
+        background: #fff;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+      }
+
+      .highlight-layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        margin: 0;
+        box-sizing: border-box;
+        z-index: 10;
+        pointer-events: none;
+      }
+
+      .highlight-rect {
+        position: absolute;
+        pointer-events: none;
+        border-radius: 2px;
+        background: rgba(59, 130, 246, 0.22);
+      }
+
+      .textLayer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        overflow: hidden;
+        line-height: 1;
+        -webkit-text-size-adjust: none;
+        forced-color-adjust: none;
+        transform-origin: 0 0;
+        user-select: text !important;
+        cursor: text;
+        z-index: 20;
+      }
+
+      .textLayer > span,
+      .textLayer > br {
+        color: transparent !important;
+        position: absolute;
+        white-space: pre;
+        cursor: text;
+        transform-origin: 0% 0%;
+      }
+
+      ::selection {
+        background: rgba(74, 144, 226, 0.3);
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="app" class="h-screen w-screen overflow-hidden flex flex-col bg-gray-100">
+      <header class="flex-shrink-0 z-40 bg-white border-b border-gray-200 shadow-sm relative px-4 py-3">
+        <div class="flex items-center gap-3 min-w-0 mb-2 flex-wrap">
+          <h1 class="text-sm sm:text-base font-semibold text-slate-800 shrink-0">课文默写（看中文写英文）</h1>
+
+          <label class="text-sm text-slate-700 shrink-0" for="gradeInput">年级：</label>
+          <input
+            id="gradeInput"
+            class="border border-slate-300 rounded px-2 py-1 text-sm w-16"
+            v-model.trim="grade"
+            :disabled="isUnitLoading"
+            @change="onUnitChange"
+          />
+
+          <label class="text-sm text-slate-700 shrink-0" for="unitSelect">单元：</label>
+          <select
+            id="unitSelect"
+            class="border border-slate-300 rounded px-2 py-1 text-sm shrink-0"
+            v-model.number="currentUnit"
+            :disabled="isUnitLoading"
+            @change="onUnitChange"
+          >
+            <option v-for="u in units" :key="u" :value="u">Unit {{ u }}</option>
+          </select>
+
+          <span class="text-xs text-slate-600 min-w-0 truncate" role="status" aria-live="polite">
+            {{ status }}
+          </span>
+        </div>
+
+        <div class="flex items-center justify-between gap-3 flex-nowrap overflow-x-auto whitespace-nowrap pt-2">
+          <span class="text-sm text-slate-500 shrink-0">课文句卡 {{ rows.length }} 条</span>
+          <div class="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              class="px-4 py-1.5 text-sm font-medium rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shrink-0"
+              @click="saveRowsManual"
+            >
+              保存
+            </button>
+            <button
+              type="button"
+              class="px-4 py-1.5 text-sm font-medium rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 shrink-0"
+              @click="downloadCsv"
+            >
+              导出 CSV
+            </button>
+            <button
+              type="button"
+              class="px-4 py-1.5 text-sm font-medium rounded-lg border border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 shrink-0"
+              @click="openCsvPrint"
+            >
+              一键传递排版
+            </button>
+            <a
+              href="/csvprint.html"
+              class="px-4 py-1.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 shrink-0"
+              target="_blank"
+              rel="noopener"
+            >
+              打开排版工具
+            </a>
+            <a
+              href="/index.html"
+              class="px-4 py-1.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 shrink-0"
+              target="_blank"
+              rel="noopener"
+            >
+              返回主标注
+            </a>
+          </div>
+        </div>
+      </header>
+
+      <main class="flex-1 w-full overflow-hidden relative flex">
+        <section class="flex-1 h-full overflow-y-auto overflow-x-hidden pr-[420px] p-6 min-w-0">
+          <div ref="pdfContainer" aria-live="polite"></div>
+        </section>
+
+        <aside
+          class="annotation-list absolute right-4 top-4 bottom-4 w-[25rem] bg-white/95 backdrop-blur shadow-2xl rounded-2xl border border-gray-200 z-30 flex flex-col overflow-hidden"
+        >
+          <div class="p-3 bg-gray-50/80 border-b border-gray-100 flex-shrink-0">
+            <h2 class="text-sm font-semibold text-slate-800">课文默写卡片</h2>
+            <p class="mt-1 text-xs text-slate-500">在 PDF 左侧直接鼠标划选文本，系统会按 . ? ! 或换行自动断句并追加卡片。</p>
+          </div>
+
+          <div v-if="!rows.length" class="py-12 px-6 text-center text-gray-400 text-sm leading-relaxed">
+            暂无句卡。请在左侧 PDF 区域划选课文文本。
+          </div>
+
+          <div v-else class="space-y-3 flex-1 overflow-y-auto p-3 pb-8">
+            <article
+              v-for="(row, idx) in rows"
+              :key="row.id"
+              class="border rounded p-2 border-slate-200 bg-slate-50"
+            >
+              <div class="text-[11px] text-slate-500 mb-1">英文原句</div>
+              <textarea
+                class="w-full border border-slate-300 rounded px-2 py-1 text-sm leading-6 resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-200"
+                rows="1"
+                v-model="row.text"
+                @input="onRowInput"
+              ></textarea>
+
+              <div class="text-[11px] text-slate-500 mt-2 mb-1">中文释义</div>
+              <textarea
+                class="w-full border rounded px-2 py-1 text-sm leading-6 resize-none overflow-hidden focus:outline-none focus:ring-2"
+                :class="hasZhText(row.zh) ? 'border-slate-300 focus:ring-blue-200' : 'border-red-300 focus:ring-red-200 bg-red-50/50'"
+                rows="1"
+                v-model="row.zh"
+                @input="onRowInput"
+              ></textarea>
+
+              <div class="mt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  class="text-xs px-2 py-1 rounded border border-blue-200 text-blue-700 bg-white hover:bg-blue-50"
+                  @click="splitCloneRow(idx)"
+                >
+                  ✂ 拆分
+                </button>
+                <button
+                  type="button"
+                  class="text-xs px-2 py-1 rounded border border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
+                  @click="deleteRow(idx)"
+                >
+                  🗑 删除
+                </button>
+              </div>
+            </article>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script>
+      (() => {
+        const { createApp } = Vue;
+
+        const PDF_WORKER_URL =
+          'https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const SCALE = 1.5;
+        const TOKEN_HIT_RATIO = 0.3;
+        const UNIT_PDF_PATHS = {
+          1: '/pdfs/unit1.pdf',
+          2: '/pdfs/unit2.pdf',
+          3: '/pdfs/unit3.pdf',
+          4: '/pdfs/unit4.pdf',
+          5: '/pdfs/unit5.pdf',
+          6: '/pdfs/unit6.pdf',
+          7: '/pdfs/unit7.pdf',
+          8: '/pdfs/unit8.pdf'
+        };
+        const UNIT_PAGE_RANGES = {
+          1: [8, 19],
+          2: [20, 31],
+          3: [32, 43],
+          4: [44, 55],
+          5: [58, 69],
+          6: [70, 81],
+          7: [82, 93],
+          8: [94, 105]
+        };
+
+        let currentPdfLoadingTask = null;
+        let currentPdfDocument = null;
+        const activePdfRenderTasks = new Set();
+
+        createApp({
+          data() {
+            return {
+              units: [1, 2, 3, 4, 5, 6, 7, 8],
+              grade: 'g5',
+              currentUnit: 1,
+              rows: [],
+              status: '正在初始化...',
+              isUnitLoading: false,
+              currentLoadToken: 0,
+              hasUnsavedChanges: false,
+              dragState: null,
+              rawAnnotations: []
+            };
+          },
+          methods: {
+            normalizedGrade() {
+              const raw = String(this.grade || '').trim().toLowerCase();
+              return /^g\d+$/.test(raw) ? raw : 'g5';
+            },
+            normalizedUnitKey() {
+              return `unit${Number(this.currentUnit)}`;
+            },
+            currentKvKey() {
+              return `${this.normalizedGrade()}_text_dictation_${this.normalizedUnitKey()}`;
+            },
+            setStatus(message) {
+              this.status = message;
+            },
+            hasZhText(value) {
+              return typeof value === 'string' && value.trim().length > 0;
+            },
+            markDirty() {
+              this.hasUnsavedChanges = true;
+            },
+            onRowInput() {
+              this.markDirty();
+            },
+            splitCloneRow(index) {
+              const src = this.rows[index];
+              if (!src) return;
+              const copy = {
+                id: crypto.randomUUID(),
+                text: String(src.text || ''),
+                zh: '',
+                createdAt: Date.now()
+              };
+              this.rows.splice(index + 1, 0, copy);
+              this.markDirty();
+              this.setStatus(`已在第 ${index + 2} 条插入拆分卡片。`);
+            },
+            deleteRow(index) {
+              if (index < 0 || index >= this.rows.length) return;
+              this.rows.splice(index, 1);
+              this.markDirty();
+              this.setStatus('已删除卡片。');
+            },
+            splitSentences(text) {
+              const raw = String(text || '').replace(/\r\n/g, '\n');
+              const chunks = [];
+              const segments = raw.split('\n');
+              for (const seg of segments) {
+                const line = seg.trim();
+                if (!line) continue;
+                const parts = line.match(/[^.!?]+(?:[.!?](?=\s|$)|$)/g) || [line];
+                for (const part of parts) {
+                  const sentence = String(part || '').trim();
+                  if (sentence) chunks.push(sentence);
+                }
+              }
+              return chunks;
+            },
+            escapeCsvField(value) {
+              const raw = value === null || value === undefined ? '' : String(value);
+              return `"${raw.replace(/"/g, '""')}"`;
+            },
+            generateCsvText() {
+              const lines = [["英文原句", "中文翻译"].map((cell) => this.escapeCsvField(cell)).join(',')];
+              for (const row of this.rows) {
+                lines.push([
+                  this.escapeCsvField(row?.text || ''),
+                  this.escapeCsvField(row?.zh || '')
+                ].join(','));
+              }
+              return `\uFEFF${lines.join('\r\n')}`;
+            },
+            downloadCsv() {
+              const csvText = this.generateCsvText();
+              const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+              const link = document.createElement('a');
+              const url = URL.createObjectURL(blob);
+              link.href = url;
+              link.download = `${this.currentKvKey()}.csv`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              URL.revokeObjectURL(url);
+              this.setStatus('已导出 CSV（英文原句/中文翻译）。');
+            },
+            openCsvPrint() {
+              const csvText = this.generateCsvText().replace(/^\uFEFF/, '');
+              const title = `${this.normalizedGrade().toUpperCase()} Unit ${Number(this.currentUnit)} Text Dictation`;
+              const url = `/csvprint.html?title=${encodeURIComponent(title)}&csv=${encodeURIComponent(csvText)}`;
+              window.open(url, '_blank', 'noopener');
+              this.setStatus('已传递当前 CSV 到排版工具。');
+            },
+            async saveRowsManual() {
+              try {
+                const payload = {
+                  grade: this.normalizedGrade(),
+                  unit: this.normalizedUnitKey(),
+                  rows: this.rows
+                };
+                const response = await fetch(
+                  `/api/text-dictation?grade=${encodeURIComponent(this.normalizedGrade())}&unit=${encodeURIComponent(this.normalizedUnitKey())}`,
+                  {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify(payload)
+                  }
+                );
+                const result = await response.json();
+                if (!response.ok || !result?.ok) {
+                  this.setStatus(result?.error || `保存失败（HTTP ${response.status}）`);
+                  return;
+                }
+                this.hasUnsavedChanges = false;
+                this.setStatus(`保存成功：${result.key}（${result.total} 条）`);
+              } catch (error) {
+                this.setStatus(`保存失败：${String(error?.message || error)}`);
+              }
+            },
+            async loadRowsFromCloud(loadToken = this.currentLoadToken) {
+              try {
+                const response = await fetch(
+                  `/api/text-dictation?grade=${encodeURIComponent(this.normalizedGrade())}&unit=${encodeURIComponent(this.normalizedUnitKey())}`,
+                  { method: 'GET', cache: 'no-store' }
+                );
+                const result = await response.json();
+                if (loadToken !== this.currentLoadToken) return;
+                if (!response.ok || !result?.ok) {
+                  this.setStatus(result?.error || `读取失败（HTTP ${response.status}）`);
+                  return;
+                }
+                this.rows = Array.isArray(result.rows) ? result.rows : [];
+                this.hasUnsavedChanges = false;
+                this.setStatus(`已加载 ${result.total} 条课文默写卡片（${result.key}）。`);
+              } catch (error) {
+                if (loadToken !== this.currentLoadToken) return;
+                this.setStatus(`读取失败：${String(error?.message || error)}`);
+              }
+            },
+            unitPdfPath(unitId) {
+              return UNIT_PDF_PATHS[Number(unitId)] || UNIT_PDF_PATHS[1];
+            },
+            getUnitPageRange(unitId = this.currentUnit) {
+              const range = UNIT_PAGE_RANGES[Number(unitId)] || [1, 1];
+              const start = Number(range[0]);
+              const end = Number(range[1]);
+              if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+                return { start: 1, end: 1, length: 1 };
+              }
+              return { start, end, length: end - start + 1 };
+            },
+            toPdfPageNum(unitId, storedPageNum) {
+              const { start, end, length } = this.getUnitPageRange(unitId);
+              const page = Number(storedPageNum);
+              if (!Number.isFinite(page) || page <= 0) return 1;
+              if (page >= start && page <= end) {
+                return Math.min(Math.max(page - start + 1, 1), length);
+              }
+              return Math.min(Math.max(page, 1), length);
+            },
+            clearNode(el) {
+              if (!el) return;
+              while (el.firstChild) el.removeChild(el.firstChild);
+            },
+            async destroyCurrentPdf() {
+              for (const renderTask of activePdfRenderTasks) {
+                renderTask.cancel?.();
+              }
+              activePdfRenderTasks.clear();
+              const loadingTask = currentPdfLoadingTask;
+              const pdfDocument = currentPdfDocument;
+              currentPdfLoadingTask = null;
+              currentPdfDocument = null;
+
+              if (loadingTask?.destroy) {
+                try { await loadingTask.destroy(); } catch {}
+              }
+              if (pdfDocument?.destroy) {
+                try { await pdfDocument.destroy(); } catch {}
+              }
+              this.clearNode(this.$refs.pdfContainer);
+            },
+            getRelativePoint(event, pageDiv) {
+              const rect = pageDiv.getBoundingClientRect();
+              const source = event.touches?.[0] || event.changedTouches?.[0] || event;
+              return {
+                x: source.clientX - rect.left,
+                y: source.clientY - rect.top
+              };
+            },
+            buildRectFromPoints(start, end) {
+              const left = Math.min(start.x, end.x);
+              const top = Math.min(start.y, end.y);
+              const right = Math.max(start.x, end.x);
+              const bottom = Math.max(start.y, end.y);
+              return {
+                left,
+                top,
+                right,
+                bottom,
+                width: right - left,
+                height: bottom - top
+              };
+            },
+            computeIntersectionArea(a, b) {
+              const left = Math.max(a.left, b.left);
+              const top = Math.max(a.top, b.top);
+              const right = Math.min(a.right, b.right);
+              const bottom = Math.min(a.bottom, b.bottom);
+              const width = right - left;
+              const height = bottom - top;
+              if (width <= 0 || height <= 0) return 0;
+              return width * height;
+            },
+            tokenizeTextItem(item, viewport) {
+              const rawText = item?.str || '';
+              if (!rawText.trim()) return [];
+
+              const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+              const fontHeight = Math.hypot(tx[2], tx[3]);
+              const fullWidth = Math.max(0, item.width * viewport.scale);
+              if (fontHeight <= 0 || fullWidth <= 0) return [];
+
+              const baseX = tx[4];
+              const baseTop = tx[5] - fontHeight;
+              const segments = rawText.match(/\S+|\s+/g) || [];
+              const totalChars = Math.max(rawText.length, 1);
+              const unitWidth = fullWidth / totalChars;
+              const tokens = [];
+              let cursorX = baseX;
+
+              for (const seg of segments) {
+                const segWidth = unitWidth * seg.length;
+                if (/\S/.test(seg) && segWidth > 0.5) {
+                  tokens.push({
+                    text: seg,
+                    rect: {
+                      left: cursorX,
+                      top: baseTop,
+                      right: cursorX + segWidth,
+                      bottom: baseTop + fontHeight
+                    }
+                  });
+                }
+                cursorX += segWidth;
+              }
+              return tokens;
+            },
+            extractPageTokensFromTextContent(textContent, viewport) {
+              const items = Array.isArray(textContent?.items) ? textContent.items : [];
+              const tokens = [];
+              for (const item of items) {
+                tokens.push(...this.tokenizeTextItem(item, viewport));
+              }
+              return tokens;
+            },
+            findHitTokens(tokens, selectionRect) {
+              const hits = [];
+              for (const token of tokens || []) {
+                const tokenRect = token.rect;
+                const tokenArea =
+                  Math.max(0, tokenRect.right - tokenRect.left) *
+                  Math.max(0, tokenRect.bottom - tokenRect.top);
+                if (tokenArea <= 0) continue;
+                const interArea = this.computeIntersectionArea(selectionRect, tokenRect);
+                const ratio = interArea / tokenArea;
+                if (ratio >= TOKEN_HIT_RATIO) hits.push(token);
+              }
+              return hits;
+            },
+            sortTokensForPhrase(tokens) {
+              return [...tokens].sort((a, b) => {
+                const dy = a.rect.top - b.rect.top;
+                if (Math.abs(dy) > 4) return dy;
+                return a.rect.left - b.rect.left;
+              });
+            },
+            clearDragState() {
+              const state = this.dragState;
+              if (state?.upHandler) document.removeEventListener('mouseup', state.upHandler);
+              this.dragState = null;
+            },
+            onMouseDownForSelect(event, pageDiv) {
+              if (event.button !== 0) return;
+              const start = this.getRelativePoint(event, pageDiv);
+              const upHandler = (upEvent) => {
+                const end = this.getRelativePoint(upEvent, pageDiv);
+                const rect = this.buildRectFromPoints(start, end);
+                this.finishDragSelect(pageDiv, rect);
+                this.clearDragState();
+              };
+              this.dragState = { upHandler };
+              document.addEventListener('mouseup', upHandler);
+            },
+            finishDragSelect(pageDiv, finalRect) {
+              if (finalRect.width < 3 || finalRect.height < 3) return;
+              const allTokens = pageDiv.__tokens || [];
+              const hitTokens = this.findHitTokens(allTokens, finalRect);
+              if (!hitTokens.length) {
+                this.setStatus('该框选区域未命中文字，已忽略。');
+                return;
+              }
+              const sorted = this.sortTokensForPhrase(hitTokens);
+              const text = sorted.map((t) => t.text).join(' ').replace(/\s+/g, ' ').trim();
+              if (!text) return;
+
+              const sentences = this.splitSentences(text);
+              if (!sentences.length) {
+                this.setStatus('未识别到有效英文句子。');
+                return;
+              }
+
+              const now = Date.now();
+              const newRows = sentences.map((sentence, i) => ({
+                id: crypto.randomUUID(),
+                text: sentence,
+                zh: '',
+                createdAt: now + i
+              }));
+              this.rows.push(...newRows);
+              this.markDirty();
+              this.setStatus(`已从划选文本自动拆分并新增 ${newRows.length} 条句卡。`);
+            },
+            drawHighlightRects(pageDiv, rects) {
+              const layer = pageDiv.querySelector('.highlight-layer');
+              if (!layer) return;
+              const rectScale = Number(pageDiv.dataset.pdfScale || SCALE) / SCALE;
+              for (const rect of rects) {
+                const mark = document.createElement('div');
+                mark.className = 'highlight-rect';
+                mark.style.left = `${rect.x * rectScale}px`;
+                mark.style.top = `${rect.y * rectScale}px`;
+                mark.style.width = `${rect.width * rectScale}px`;
+                mark.style.height = `${rect.height * rectScale}px`;
+                layer.appendChild(mark);
+              }
+            },
+            repaintCurrentUnitHighlights() {
+              const container = this.$refs.pdfContainer;
+              if (!container) return;
+              const rows = this.rawAnnotations || [];
+              const byPage = new Map();
+              for (const row of rows) {
+                const page = this.toPdfPageNum(this.currentUnit, row?.pageNum);
+                if (!Number.isFinite(page) || page <= 0) continue;
+                const list = byPage.get(page) || [];
+                const rects = Array.isArray(row?.rects) ? row.rects : [];
+                list.push(...rects);
+                byPage.set(page, list);
+              }
+
+              for (const pageDiv of container.querySelectorAll('.page-container')) {
+                const pageNumber = Number(pageDiv.dataset.pageNumber || '0');
+                const layer = pageDiv.querySelector('.highlight-layer');
+                if (!layer) continue;
+                layer.innerHTML = '';
+                this.drawHighlightRects(pageDiv, byPage.get(pageNumber) || []);
+              }
+            },
+            async loadReadOnlyAnnotations() {
+              try {
+                const response = await fetch('/api/annotations?unit=' + encodeURIComponent(String(Number(this.currentUnit))), {
+                  method: 'GET',
+                  cache: 'no-store'
+                });
+                const payload = await response.json();
+                if (!response.ok || !payload?.ok) {
+                  this.rawAnnotations = [];
+                  return;
+                }
+                this.rawAnnotations = Array.isArray(payload.annotations) ? payload.annotations : [];
+              } catch {
+                this.rawAnnotations = [];
+              }
+            },
+            async renderPage(pdfDoc, pageNum, container, loadToken) {
+              if (loadToken !== this.currentLoadToken) return false;
+              const page = await pdfDoc.getPage(pageNum);
+              if (loadToken !== this.currentLoadToken) return false;
+              const baseViewport = page.getViewport({ scale: 1 });
+              const availableWidth = Math.max(320, container.clientWidth || baseViewport.width * SCALE);
+              const scale = Math.min(SCALE, availableWidth / baseViewport.width);
+              const viewport = page.getViewport({ scale });
+              const pixelRatio = window.devicePixelRatio || 1;
+
+              const pageDiv = document.createElement('div');
+              pageDiv.className = 'page-container';
+              pageDiv.dataset.pageNumber = String(pageNum);
+              pageDiv.dataset.pdfScale = String(scale);
+              pageDiv.style.width = `${viewport.width}px`;
+              pageDiv.style.height = `${viewport.height}px`;
+
+              const canvas = document.createElement('canvas');
+              const context = canvas.getContext('2d');
+              canvas.width = Math.floor(viewport.width * pixelRatio);
+              canvas.height = Math.floor(viewport.height * pixelRatio);
+              canvas.style.width = `${viewport.width}px`;
+              canvas.style.height = `${viewport.height}px`;
+
+              const renderContext = {
+                canvasContext: context,
+                transform: pixelRatio !== 1 ? [pixelRatio, 0, 0, pixelRatio, 0, 0] : null,
+                viewport
+              };
+              const renderTask = page.render(renderContext);
+              activePdfRenderTasks.add(renderTask);
+              try {
+                await renderTask.promise;
+              } finally {
+                activePdfRenderTasks.delete(renderTask);
+              }
+              if (loadToken !== this.currentLoadToken) return false;
+              pageDiv.appendChild(canvas);
+
+              const highlightLayer = document.createElement('div');
+              highlightLayer.className = 'highlight-layer';
+              pageDiv.appendChild(highlightLayer);
+              container.appendChild(pageDiv);
+
+              const textLayerDiv = document.createElement('div');
+              textLayerDiv.className = 'textLayer';
+              textLayerDiv.style.width = `${viewport.width}px`;
+              textLayerDiv.style.height = `${viewport.height}px`;
+
+              const textContent = await page.getTextContent();
+              if (loadToken !== this.currentLoadToken) return false;
+              pageDiv.__tokens = this.extractPageTokensFromTextContent(textContent, viewport);
+              const task = pdfjsLib.renderTextLayer({
+                textContentSource: textContent,
+                container: textLayerDiv,
+                viewport,
+                textDivs: []
+              });
+              if (task?.promise) {
+                await task.promise;
+              } else {
+                await task;
+              }
+              if (loadToken !== this.currentLoadToken) return false;
+
+              textLayerDiv.addEventListener('mousedown', (event) => this.onMouseDownForSelect(event, pageDiv));
+              pageDiv.appendChild(textLayerDiv);
+              return true;
+            },
+            async renderPdfForUnit(unitId = this.currentUnit, loadToken = this.currentLoadToken) {
+              const unitNum = Number(unitId);
+              const pdfPath = this.unitPdfPath(unitNum);
+              const container = this.$refs.pdfContainer;
+              this.clearNode(container);
+
+              const loadingTask = pdfjsLib.getDocument({ url: pdfPath, useWorkerFetch: false });
+              currentPdfLoadingTask = loadingTask;
+              const pdfDoc = await loadingTask.promise;
+              currentPdfDocument = pdfDoc;
+              currentPdfLoadingTask = null;
+              if (loadToken !== this.currentLoadToken) return false;
+
+              for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum += 1) {
+                if (loadToken !== this.currentLoadToken) return false;
+                const rendered = await this.renderPage(pdfDoc, pageNum, container, loadToken);
+                if (!rendered) return false;
+              }
+
+              this.repaintCurrentUnitHighlights();
+              return true;
+            },
+            async onUnitChange() {
+              const loadToken = ++this.currentLoadToken;
+              this.isUnitLoading = true;
+              try {
+                await this.destroyCurrentPdf();
+                if (loadToken !== this.currentLoadToken) return;
+                await this.loadReadOnlyAnnotations();
+                if (loadToken !== this.currentLoadToken) return;
+                await this.renderPdfForUnit(this.currentUnit, loadToken);
+                if (loadToken !== this.currentLoadToken) return;
+                await this.loadRowsFromCloud(loadToken);
+              } catch (error) {
+                this.setStatus(`切换单元失败：${String(error?.message || error)}`);
+              } finally {
+                if (loadToken === this.currentLoadToken) this.isUnitLoading = false;
+              }
+            }
+          },
+          async mounted() {
+            if (!window.pdfjsLib) {
+              this.setStatus('PDF.js 加载失败，请检查网络。');
+              return;
+            }
+            pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
+            const loadToken = this.currentLoadToken;
+            this.isUnitLoading = true;
+            try {
+              await this.loadReadOnlyAnnotations();
+              await this.renderPdfForUnit(this.currentUnit, loadToken);
+              await this.loadRowsFromCloud(loadToken);
+            } catch (error) {
+              this.setStatus(`加载失败：${String(error?.message || error)}`);
+            } finally {
+              this.isUnitLoading = false;
+            }
+          },
+          beforeUnmount() {
+            this.clearDragState();
+            this.destroyCurrentPdf();
+          }
+        }).mount('#app');
+      })();
+    </script>
+  </body>
+</html>

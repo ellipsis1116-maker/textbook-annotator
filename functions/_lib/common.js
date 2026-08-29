@@ -69,6 +69,29 @@ export function getUnitDataKey(unit) {
   return `unit_${unit}_data`;
 }
 
+export function normalizeGradeKey(grade) {
+  const raw = String(grade || '').trim().toLowerCase();
+  const matched = raw.match(/^g\d+$/);
+  if (matched) return matched[0];
+  return 'g5';
+}
+
+export function normalizeUnitKey(unit) {
+  const raw = String(unit || '').trim().toLowerCase();
+  const fromNamed = raw.match(/^unit\s*(\d+)$/);
+  const fromNumber = raw.match(/^\d+$/);
+  const parsed = Number(fromNamed ? fromNamed[1] : fromNumber ? raw : NaN);
+  if (!Number.isInteger(parsed) || !isValidUnit(parsed)) return null;
+  return `unit${parsed}`;
+}
+
+export function getTextDictationKey(grade, unit) {
+  const gradeKey = normalizeGradeKey(grade);
+  const unitKey = normalizeUnitKey(unit);
+  if (!unitKey) return null;
+  return `${gradeKey}_text_dictation_${unitKey}`;
+}
+
 export function normalizeAnnotationRow(raw = {}) {
   const row = typeof raw === 'object' && raw ? raw : {};
   const rects = Array.isArray(row.rects) ? row.rects : [];
