@@ -302,17 +302,25 @@
         );
       }
 
-      /** Dictation HTML: replace bracket groups with styled blank spans */
+      /** Dictation HTML: replace bracket groups with per-word styled blank spans */
       function dictClozeHtml(text) {
         return escapeHtml(String(text || '')).replace(
           CLOZE_RE,
-          '<span class="cloze-blank">____</span>'
+          function (_match, wordsInside) {
+            const words = wordsInside.trim().split(/\s+/).filter(Boolean);
+            return words
+              .map(() => '<span class="inline-block border-b border-gray-800 min-w-[50px] mx-1">&nbsp;</span>')
+              .join('');
+          }
         );
       }
 
-      /** Plain-text: replace brackets with underscores */
+      /** Plain-text: replace brackets with per-word underscores */
       function dictClozePlain(text) {
-        return String(text || '').replace(CLOZE_RE, '___________');
+        return String(text || '').replace(CLOZE_RE, function (_match, wordsInside) {
+          const words = wordsInside.trim().split(/\s+/).filter(Boolean);
+          return words.map(() => '___________').join(' ');
+        });
       }
 
       /** Plain-text: strip brackets, keep word */
